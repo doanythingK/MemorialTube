@@ -11,6 +11,7 @@ from app.models import ProjectStatus
 from app.security.path_guard import ensure_safe_input_path, ensure_safe_output_path
 from app.schemas import (
     AssetResponse,
+    JobCancelResponse,
     JobEnqueueResponse,
     ProjectCreateRequest,
     ProjectResponse,
@@ -114,6 +115,9 @@ def run_project_pipeline(
     assets = crud.list_assets_by_project(db, project_id)
     if len(assets) == 0:
         raise HTTPException(status_code=400, detail="No assets uploaded")
+    active_job = crud.get_latest_active_project_job(db, project_id)
+    if active_job is not None:
+        raise HTTPException(status_code=409, detail=f"Project is already running (job_id={active_job.id})")
 
     try:
         image_paths = [ensure_safe_input_path(a.file_path) for a in assets]
@@ -130,6 +134,7 @@ def run_project_pipeline(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     job = crud.create_job(db, job_type="pipeline_project")
+    crud.create_project_run(db, project_id, job.id)
     crud.set_project_status(db, project_id, ProjectStatus.RUNNING)
 
     try:
@@ -152,3 +157,27 @@ def run_project_pipeline(
         raise HTTPException(status_code=500, detail="Failed to enqueue project pipeline") from exc
 
     return JobEnqueueResponse(job_id=job.id, task_id=async_result.id, status=job.status)
+
+
+@router.post("/{project_id}/cancel", response_model=JobCancelResponse, status_code=status.HTTP_202_ACCEPTED)
+def cancel_project_pipeline(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> JobCancelResponse:
+    project = crud.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    active_job = crud.get_latest_active_project_job(db, project_id)
+    if active_job is None:
+        raise HTTPException(status_code=409, detail="No active project job to cancel")
+
+    runtime = crud.request_job_cancel(db, active_job.id)
+    return JobCancelResponse(
+        job_id=active_job.id,
+        status=active_job.status,
+        cancel_requested=runtime.cancel_requested,
+        stage=runtime.stage,
+        progress_percent=runtime.progress_percent,
+        detail_message=runtime.detail_message,
+    )

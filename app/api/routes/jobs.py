@@ -9,9 +9,11 @@ from app.models import JobStatus
 from app.security.path_guard import ensure_safe_input_path, ensure_safe_output_path
 from app.schemas import (
     CanvasJobCreateRequest,
+    JobCancelResponse,
     JobCreateRequest,
     JobEnqueueResponse,
     JobResponse,
+    JobRuntimeResponse,
     LastClipJobCreateRequest,
     PipelineJobCreateRequest,
     RenderJobCreateRequest,
@@ -28,6 +30,26 @@ from app.tasks import (
 
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+def _build_job_response(job_id: str, db: Session) -> JobResponse:
+    job = crud.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    runtime = crud.get_job_runtime(db, job_id)
+    return JobResponse(
+        id=job.id,
+        job_type=job.job_type,
+        status=job.status,
+        error_message=job.error_message,
+        result_message=job.result_message,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        stage=runtime.stage if runtime else None,
+        progress_percent=runtime.progress_percent if runtime else None,
+        detail_message=runtime.detail_message if runtime else None,
+        cancel_requested=runtime.cancel_requested if runtime else None,
+    )
 
 
 @router.post("/test", response_model=JobEnqueueResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -196,10 +218,18 @@ def enqueue_pipeline_job(
 
 @router.get("/{job_id}", response_model=JobResponse)
 def get_job(job_id: str, db: Session = Depends(get_db)) -> JobResponse:
+    return _build_job_response(job_id, db)
+
+
+@router.get("/{job_id}/runtime", response_model=JobRuntimeResponse)
+def get_job_runtime(job_id: str, db: Session = Depends(get_db)) -> JobRuntimeResponse:
     job = crud.get_job(db, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    runtime = crud.get_job_runtime(db, job_id)
+    if runtime is None:
+        raise HTTPException(status_code=404, detail="Job runtime not found")
+    return runtime
 
 
 @router.get("", response_model=list[JobResponse])
@@ -207,4 +237,52 @@ def list_jobs(
     db: Session = Depends(get_db),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[JobResponse]:
-    return crud.list_jobs(db, limit=limit)
+    jobs = crud.list_jobs(db, limit=limit)
+    runtimes = crud.list_job_runtimes(db, [j.id for j in jobs])
+    responses: list[JobResponse] = []
+    for job in jobs:
+        rt = runtimes.get(job.id)
+        responses.append(
+            JobResponse(
+                id=job.id,
+                job_type=job.job_type,
+                status=job.status,
+                error_message=job.error_message,
+                result_message=job.result_message,
+                created_at=job.created_at,
+                updated_at=job.updated_at,
+                stage=rt.stage if rt else None,
+                progress_percent=rt.progress_percent if rt else None,
+                detail_message=rt.detail_message if rt else None,
+                cancel_requested=rt.cancel_requested if rt else None,
+            )
+        )
+    return responses
+
+
+@router.post("/{job_id}/cancel", response_model=JobCancelResponse, status_code=status.HTTP_202_ACCEPTED)
+def cancel_job(job_id: str, db: Session = Depends(get_db)) -> JobCancelResponse:
+    job = crud.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status in {JobStatus.SUCCEEDED, JobStatus.FAILED}:
+        runtime = crud.get_job_runtime(db, job_id)
+        return JobCancelResponse(
+            job_id=job.id,
+            status=job.status,
+            cancel_requested=bool(runtime.cancel_requested) if runtime else False,
+            stage=runtime.stage if runtime else "unknown",
+            progress_percent=runtime.progress_percent if runtime else 0,
+            detail_message=runtime.detail_message if runtime else "already finished",
+        )
+
+    runtime = crud.request_job_cancel(db, job_id)
+    return JobCancelResponse(
+        job_id=job.id,
+        status=job.status,
+        cancel_requested=runtime.cancel_requested,
+        stage=runtime.stage,
+        progress_percent=runtime.progress_percent,
+        detail_message=runtime.detail_message,
+    )

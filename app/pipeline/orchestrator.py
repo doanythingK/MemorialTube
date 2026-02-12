@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from app.canvas.pipeline import run_canvas_job
 from app.video.last_clip import build_last_clip
@@ -39,6 +40,8 @@ def run_full_pipeline(
     last_clip_motion_style: str,
     bgm_path: str | None,
     bgm_volume: float,
+    on_progress: Callable[[str, int, str | None], None] | None = None,
+    check_canceled: Callable[[], None] | None = None,
 ) -> PipelineRunSummary:
     if not image_paths:
         raise ValueError("image_paths must not be empty")
@@ -46,6 +49,14 @@ def run_full_pipeline(
         raise ValueError("transition_prompt is required")
 
     _require_files(image_paths)
+
+    def _emit(stage: str, progress: int, detail: str | None = None) -> None:
+        if on_progress is not None:
+            on_progress(stage, progress, detail)
+
+    def _check() -> None:
+        if check_canceled is not None:
+            check_canceled()
 
     root = Path(working_dir)
     canvas_dir = root / "canvas"
@@ -62,8 +73,16 @@ def run_full_pipeline(
     transition_fallback_count = 0
     safety_failed_count = 0
 
+    _emit("pipeline_prepare", 1, "starting pipeline")
+    _check()
+
     # 1) Normalize/extend each image to target canvas.
+    total_images = len(image_paths)
+    _emit("canvas_start", 5, f"canvas start: {total_images} image(s)")
     for idx, img_path in enumerate(image_paths):
+        _check()
+        canvas_progress = 6 + int(((idx) / max(1, total_images)) * 33)
+        _emit("canvas", canvas_progress, f"canvas {idx + 1}/{total_images}")
         out_path = canvas_dir / f"canvas_{idx:04d}.jpg"
         canvas_result = run_canvas_job(img_path, str(out_path))
         canvas_paths.append(str(out_path))
@@ -73,10 +92,16 @@ def run_full_pipeline(
             canvas_fallback_count += 1
         if not canvas_result.safety_passed:
             safety_failed_count += 1
+    _emit("canvas_done", 40, f"canvas done: {len(canvas_paths)} image(s)")
 
     # 2) Build transitions between adjacent images.
     if len(canvas_paths) >= 2:
-        for idx in range(len(canvas_paths) - 1):
+        total_transitions = len(canvas_paths) - 1
+        _emit("transition_start", 45, f"transition start: {total_transitions} clip(s)")
+        for idx in range(total_transitions):
+            _check()
+            trans_progress = 46 + int(((idx) / max(1, total_transitions)) * 28)
+            _emit("transition", trans_progress, f"transition {idx + 1}/{total_transitions}")
             out_clip = transition_dir / f"transition_{idx:04d}.mp4"
             t_result = build_transition_clip(
                 image_a_path=canvas_paths[idx],
@@ -92,8 +117,13 @@ def run_full_pipeline(
                 transition_fallback_count += 1
             if not t_result.safety_passed:
                 safety_failed_count += 1
+        _emit("transition_done", 75, f"transition done: {len(transition_paths)} clip(s)")
+    else:
+        _emit("transition_skipped", 75, "transition skipped: single image")
 
     # 3) Build last standalone clip using last image.
+    _check()
+    _emit("last_clip_start", 82, "building last clip")
     last_source = canvas_paths[-1]
     last_clip_path = str(last_dir / "last_clip.mp4")
     build_last_clip(
@@ -102,8 +132,11 @@ def run_full_pipeline(
         duration_seconds=last_clip_duration_seconds,
         motion_style=last_clip_motion_style,
     )
+    _emit("last_clip_done", 90, "last clip completed")
 
     # 4) Final render with transitions + last clip.
+    _check()
+    _emit("render_start", 92, "building final render")
     all_clips = [*transition_paths, last_clip_path]
     final_path = build_final_render(
         clip_paths=all_clips,
@@ -111,6 +144,8 @@ def run_full_pipeline(
         bgm_path=bgm_path,
         bgm_volume=bgm_volume,
     )
+    _emit("render_done", 99, "final render completed")
+    _emit("completed", 100, "pipeline completed")
 
     return PipelineRunSummary(
         final_output_path=final_path,

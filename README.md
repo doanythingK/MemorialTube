@@ -232,6 +232,12 @@ curl -X POST http://localhost:8000/api/v1/projects/<project_id>/run \
   -d '{}'
 ```
 
+4. 프로젝트 실행 취소
+
+```bash
+curl -X POST http://localhost:8000/api/v1/projects/<project_id>/cancel
+```
+
 ## 11. 주요 환경변수
 
 `.env.example` 기준:
@@ -255,6 +261,19 @@ curl -X POST http://localhost:8000/api/v1/projects/<project_id>/run \
 경로 정책:
 - API로 전달하는 입력/출력 경로는 `data/` 또는 `STORAGE_ROOT` 하위만 허용됩니다.
 - 경로가 허용 루트를 벗어나면 요청이 거부됩니다.
+
+진행률/취소 API:
+- `GET /api/v1/jobs/{job_id}`: `stage`, `progress_percent`, `detail_message`, `cancel_requested` 포함
+- `GET /api/v1/jobs/{job_id}/runtime`: runtime 상세만 조회
+- `POST /api/v1/jobs/{job_id}/cancel`: 개별 작업 취소 요청
+- `POST /api/v1/projects/{project_id}/cancel`: 프로젝트의 현재 실행 작업 취소 요청
+
+주요 `stage` 예시:
+- CanvasJob: `canvas_start` -> `canvas_generate` -> `canvas_validate` -> `canvas_done`
+- TransitionJob: `transition_start` -> `transition_generate` -> `transition_validate` -> `transition_done`
+- LastClipJob: `last_clip_start` -> `last_clip_generate` -> `last_clip_finalize` -> `last_clip_done`
+- RenderJob: `render_start` -> `render_concat` -> `render_finalize` -> `render_done`
+- PipelineJob: `pipeline_prepare` -> `canvas_start/canvas/canvas_done` -> `transition_start/transition/transition_done` -> `last_clip_start/last_clip_done` -> `render_start/render_done` -> `completed`
 
 ## 12. 다음 구현 권장
 

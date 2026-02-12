@@ -57,6 +57,18 @@ class JobEnqueueResponse(BaseModel):
     status: JobStatus
 
 
+class JobRuntimeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    job_id: str
+    stage: str
+    progress_percent: int
+    detail_message: str | None
+    cancel_requested: bool
+    created_at: datetime
+    updated_at: datetime
+
+
 class JobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -67,6 +79,19 @@ class JobResponse(BaseModel):
     result_message: str | None
     created_at: datetime
     updated_at: datetime
+    stage: str | None = None
+    progress_percent: int | None = None
+    detail_message: str | None = None
+    cancel_requested: bool | None = None
+
+
+class JobCancelResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    cancel_requested: bool
+    stage: str
+    progress_percent: int
+    detail_message: str | None
 
 
 class ProjectCreateRequest(BaseModel):
