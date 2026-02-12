@@ -1,0 +1,7 @@
+# Optional AI runtime dependencies for real outpainting/detection
+torch>=2.2,<3.0
+diffusers>=0.27,<1.0
+transformers>=4.39,<5.0
+accelerate>=0.27,<1.0
+safetensors>=0.4,<1.0
+ultralytics>=8.1,<9.0
