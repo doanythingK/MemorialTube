@@ -10,6 +10,7 @@ from app.schemas import (
     JobEnqueueResponse,
     JobResponse,
     LastClipJobCreateRequest,
+    PipelineJobCreateRequest,
     RenderJobCreateRequest,
     TransitionJobCreateRequest,
 )
@@ -17,6 +18,7 @@ from app.tasks import (
     run_canvas_render,
     run_final_render,
     run_last_clip_render,
+    run_pipeline_render,
     run_test_render,
     run_transition_render,
 )
@@ -115,6 +117,34 @@ def enqueue_render_job(
             job.id,
             payload.clip_paths,
             payload.output_path,
+            payload.bgm_path,
+            payload.bgm_volume,
+        )
+    except Exception as exc:  # noqa: BLE001 - broker error path
+        crud.set_job_status(db, job.id, JobStatus.FAILED, error_message=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to enqueue task") from exc
+
+    return JobEnqueueResponse(job_id=job.id, task_id=async_result.id, status=job.status)
+
+
+@router.post("/pipeline", response_model=JobEnqueueResponse, status_code=status.HTTP_202_ACCEPTED)
+def enqueue_pipeline_job(
+    payload: PipelineJobCreateRequest,
+    db: Session = Depends(get_db),
+) -> JobEnqueueResponse:
+    job = crud.create_job(db, job_type="pipeline")
+
+    try:
+        async_result = run_pipeline_render.delay(
+            job.id,
+            payload.image_paths,
+            payload.working_dir,
+            payload.final_output_path,
+            payload.transition_duration_seconds,
+            payload.transition_prompt,
+            payload.transition_negative_prompt,
+            payload.last_clip_duration_seconds,
+            payload.last_clip_motion_style,
             payload.bgm_path,
             payload.bgm_volume,
         )

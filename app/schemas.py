@@ -38,6 +38,19 @@ class RenderJobCreateRequest(BaseModel):
     bgm_volume: float = Field(default=0.15, ge=0.0, le=1.0)
 
 
+class PipelineJobCreateRequest(BaseModel):
+    image_paths: list[str] = Field(min_length=1)
+    working_dir: str
+    final_output_path: str
+    transition_duration_seconds: Literal[6, 10] = 6
+    transition_prompt: str
+    transition_negative_prompt: str | None = None
+    last_clip_duration_seconds: int = Field(default=4, ge=2, le=20)
+    last_clip_motion_style: Literal["zoom_in", "zoom_out", "none"] = "zoom_in"
+    bgm_path: str | None = None
+    bgm_volume: float = Field(default=0.15, ge=0.0, le=1.0)
+
+
 class JobEnqueueResponse(BaseModel):
     job_id: str
     task_id: str

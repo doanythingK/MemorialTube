@@ -7,6 +7,7 @@ from app.celery_app import celery_app
 from app.config import settings
 from app.db import SessionLocal
 from app.models import JobStatus
+from app.pipeline.orchestrator import run_full_pipeline
 from app.video.last_clip import build_last_clip
 from app.video.render import build_final_render
 from app.video.transition import build_transition_clip
@@ -175,6 +176,58 @@ def run_final_render(
         message = (
             f"final render done: clips={len(clip_paths)}, "
             f"bgm={'yes' if bgm_path else 'no'}, output={built}"
+        )
+        crud.set_job_status(
+            db,
+            job_id,
+            JobStatus.SUCCEEDED,
+            result_message=message,
+        )
+        return {"job_id": job_id, "result": message}
+    except Exception as exc:  # noqa: BLE001 - worker failure must be captured
+        crud.set_job_status(db, job_id, JobStatus.FAILED, error_message=str(exc))
+        raise
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.tasks.run_pipeline_render")
+def run_pipeline_render(
+    job_id: str,
+    image_paths: list[str],
+    working_dir: str,
+    final_output_path: str,
+    transition_duration_seconds: int,
+    transition_prompt: str,
+    transition_negative_prompt: str | None,
+    last_clip_duration_seconds: int,
+    last_clip_motion_style: str,
+    bgm_path: str | None,
+    bgm_volume: float,
+) -> dict[str, str]:
+    db = SessionLocal()
+    try:
+        crud.set_job_status(db, job_id, JobStatus.PROCESSING)
+
+        summary = run_full_pipeline(
+            image_paths=image_paths,
+            working_dir=working_dir,
+            final_output_path=final_output_path,
+            transition_duration_seconds=transition_duration_seconds,
+            transition_prompt=transition_prompt,
+            transition_negative_prompt=transition_negative_prompt,
+            last_clip_duration_seconds=last_clip_duration_seconds,
+            last_clip_motion_style=last_clip_motion_style,
+            bgm_path=bgm_path,
+            bgm_volume=bgm_volume,
+        )
+
+        message = (
+            f"pipeline done: images={len(image_paths)}, "
+            f"transitions={len(summary.transition_paths)}, "
+            f"fallbacks={summary.fallback_count}, "
+            f"safety_failed={summary.safety_failed_count}, "
+            f"output={summary.final_output_path}"
         )
         crud.set_job_status(
             db,

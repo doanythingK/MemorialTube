@@ -170,7 +170,28 @@ curl -X POST http://localhost:8000/api/v1/jobs/render \
   -d '{"clip_paths":["data/output/transition_1.mp4","data/output/transition_2.mp4","data/output/last_clip.mp4"],"output_path":"data/output/final.mp4","bgm_path":"data/input/bgm.mp3","bgm_volume":0.15}'
 ```
 
-## 9. 주요 환경변수
+## 9. PipelineJob 실행 (원클릭 전체 생성)
+
+아래 요청 1회로 `Canvas -> Transition들 -> LastClip -> Render`를 순차 실행합니다.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/jobs/pipeline \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_paths":["data/input/pet1.jpg","data/input/pet2.jpg","data/input/pet3.jpg"],
+    "working_dir":"data/work/p1",
+    "final_output_path":"data/output/final_pipeline.mp4",
+    "transition_duration_seconds":6,
+    "transition_prompt":"gentle memorial cinematic transition, soft light",
+    "transition_negative_prompt":"extra animal, distorted pet",
+    "last_clip_duration_seconds":4,
+    "last_clip_motion_style":"zoom_in",
+    "bgm_path":"data/input/bgm.mp3",
+    "bgm_volume":0.15
+  }'
+```
+
+## 10. 주요 환경변수
 
 `.env.example` 기준:
 
@@ -189,7 +210,7 @@ curl -X POST http://localhost:8000/api/v1/jobs/render \
 - `TRANSITION_MAX_ATTEMPTS=2`
 - `TRANSITION_GENERATION_STEP=8` (중간 프레임 생성 간격)
 
-## 10. 다음 구현 권장
+## 11. 다음 구현 권장
 
 - 품질게이트 임계값과 타임아웃 정책 확정
 - 전환/렌더 단계의 품질게이트 지표 고도화
