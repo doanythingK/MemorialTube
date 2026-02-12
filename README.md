@@ -20,7 +20,20 @@ Python 기반 추모영상 생성 서비스 뼈대입니다.
 
 ## 2. 빠른 시작 (로컬)
 
-1. 환경 변수 파일 생성
+1. 로컬 셋업 스크립트 실행 (권장)
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+AI 의존성까지 함께 설치하려면:
+
+```bash
+./setup.sh --with-ai
+```
+
+2. 환경 변수 파일 생성
 
 ```bash
 cp .env.example .env
@@ -32,19 +45,19 @@ cp .env.example .env
 FFMPEG_PATH=./bin/ffmpeg
 ```
 
-2. 컨테이너 실행
+3. 컨테이너 실행
 
 ```bash
 make up
 ```
 
-3. 상태 확인
+4. 상태 확인
 
 ```bash
 make ps
 ```
 
-4. API 헬스체크
+5. API 헬스체크
 
 ```bash
 curl http://localhost:8000/api/v1/health
