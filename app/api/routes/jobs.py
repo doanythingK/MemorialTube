@@ -1,9 +1,12 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app import crud
 from app.db import get_db
 from app.models import JobStatus
+from app.security.path_guard import ensure_safe_input_path, ensure_safe_output_path
 from app.schemas import (
     CanvasJobCreateRequest,
     JobCreateRequest,
@@ -48,10 +51,16 @@ def enqueue_canvas_job(
     payload: CanvasJobCreateRequest,
     db: Session = Depends(get_db),
 ) -> JobEnqueueResponse:
+    try:
+        input_path = ensure_safe_input_path(payload.input_path)
+        output_path = ensure_safe_output_path(payload.output_path)
+    except Exception as exc:  # noqa: BLE001 - validation path
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     job = crud.create_job(db, job_type="canvas")
 
     try:
-        async_result = run_canvas_render.delay(job.id, payload.input_path, payload.output_path)
+        async_result = run_canvas_render.delay(job.id, input_path, output_path)
     except Exception as exc:  # noqa: BLE001 - broker error path
         crud.set_job_status(db, job.id, JobStatus.FAILED, error_message=str(exc))
         raise HTTPException(status_code=500, detail="Failed to enqueue task") from exc
@@ -64,14 +73,21 @@ def enqueue_transition_job(
     payload: TransitionJobCreateRequest,
     db: Session = Depends(get_db),
 ) -> JobEnqueueResponse:
+    try:
+        image_a_path = ensure_safe_input_path(payload.image_a_path)
+        image_b_path = ensure_safe_input_path(payload.image_b_path)
+        output_path = ensure_safe_output_path(payload.output_path)
+    except Exception as exc:  # noqa: BLE001 - validation path
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     job = crud.create_job(db, job_type="transition")
 
     try:
         async_result = run_transition_render.delay(
             job.id,
-            payload.image_a_path,
-            payload.image_b_path,
-            payload.output_path,
+            image_a_path,
+            image_b_path,
+            output_path,
             payload.duration_seconds,
             payload.prompt,
             payload.negative_prompt,
@@ -88,13 +104,19 @@ def enqueue_last_clip_job(
     payload: LastClipJobCreateRequest,
     db: Session = Depends(get_db),
 ) -> JobEnqueueResponse:
+    try:
+        image_path = ensure_safe_input_path(payload.image_path)
+        output_path = ensure_safe_output_path(payload.output_path)
+    except Exception as exc:  # noqa: BLE001 - validation path
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     job = crud.create_job(db, job_type="last_clip")
 
     try:
         async_result = run_last_clip_render.delay(
             job.id,
-            payload.image_path,
-            payload.output_path,
+            image_path,
+            output_path,
             payload.duration_seconds,
             payload.motion_style,
         )
@@ -110,14 +132,21 @@ def enqueue_render_job(
     payload: RenderJobCreateRequest,
     db: Session = Depends(get_db),
 ) -> JobEnqueueResponse:
+    try:
+        clip_paths = [ensure_safe_input_path(p) for p in payload.clip_paths]
+        output_path = ensure_safe_output_path(payload.output_path)
+        bgm_path = ensure_safe_input_path(payload.bgm_path) if payload.bgm_path else None
+    except Exception as exc:  # noqa: BLE001 - validation path
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     job = crud.create_job(db, job_type="render")
 
     try:
         async_result = run_final_render.delay(
             job.id,
-            payload.clip_paths,
-            payload.output_path,
-            payload.bgm_path,
+            clip_paths,
+            output_path,
+            bgm_path,
             payload.bgm_volume,
         )
     except Exception as exc:  # noqa: BLE001 - broker error path
@@ -132,20 +161,30 @@ def enqueue_pipeline_job(
     payload: PipelineJobCreateRequest,
     db: Session = Depends(get_db),
 ) -> JobEnqueueResponse:
+    try:
+        image_paths = [ensure_safe_input_path(p) for p in payload.image_paths]
+        # Validate working directory under allowed roots.
+        working_marker = ensure_safe_output_path(str(Path(payload.working_dir) / ".path_check"))
+        working_dir = str(Path(working_marker).parent)
+        final_output_path = ensure_safe_output_path(payload.final_output_path)
+        bgm_path = ensure_safe_input_path(payload.bgm_path) if payload.bgm_path else None
+    except Exception as exc:  # noqa: BLE001 - validation path
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     job = crud.create_job(db, job_type="pipeline")
 
     try:
         async_result = run_pipeline_render.delay(
             job.id,
-            payload.image_paths,
-            payload.working_dir,
-            payload.final_output_path,
+            image_paths,
+            working_dir,
+            final_output_path,
             payload.transition_duration_seconds,
             payload.transition_prompt,
             payload.transition_negative_prompt,
             payload.last_clip_duration_seconds,
             payload.last_clip_motion_style,
-            payload.bgm_path,
+            bgm_path,
             payload.bgm_volume,
         )
     except Exception as exc:  # noqa: BLE001 - broker error path

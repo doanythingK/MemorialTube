@@ -6,7 +6,7 @@ from app.canvas.pipeline import run_canvas_job
 from app.celery_app import celery_app
 from app.config import settings
 from app.db import SessionLocal
-from app.models import JobStatus
+from app.models import JobStatus, ProjectStatus
 from app.pipeline.orchestrator import run_full_pipeline
 from app.video.last_clip import build_last_clip
 from app.video.render import build_final_render
@@ -204,6 +204,7 @@ def run_pipeline_render(
     last_clip_motion_style: str,
     bgm_path: str | None,
     bgm_volume: float,
+    project_id: str | None = None,
 ) -> dict[str, str]:
     db = SessionLocal()
     try:
@@ -235,9 +236,19 @@ def run_pipeline_render(
             JobStatus.SUCCEEDED,
             result_message=message,
         )
+        if project_id:
+            try:
+                crud.set_project_status(db, project_id, ProjectStatus.COMPLETED)
+            except Exception:
+                pass
         return {"job_id": job_id, "result": message}
     except Exception as exc:  # noqa: BLE001 - worker failure must be captured
         crud.set_job_status(db, job_id, JobStatus.FAILED, error_message=str(exc))
+        if project_id:
+            try:
+                crud.set_project_status(db, project_id, ProjectStatus.FAILED)
+            except Exception:
+                pass
         raise
     finally:
         db.close()

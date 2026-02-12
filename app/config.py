@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     transition_allowed_extra_animals: int = 0
     transition_safety_sample_step: int = 8
 
+    storage_root: str = "data/storage"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 

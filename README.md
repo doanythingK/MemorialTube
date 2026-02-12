@@ -191,7 +191,48 @@ curl -X POST http://localhost:8000/api/v1/jobs/pipeline \
   }'
 ```
 
-## 10. 주요 환경변수
+## 10. Project 기반 실행(업로드 -> 실행)
+
+1. 프로젝트 생성
+
+```bash
+curl -X POST http://localhost:8000/api/v1/projects \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name":"memorial-project-001",
+    "transition_duration_seconds":6,
+    "transition_prompt":"gentle memorial cinematic transition, soft light",
+    "transition_negative_prompt":"extra animal, distorted pet",
+    "last_clip_duration_seconds":4,
+    "last_clip_motion_style":"zoom_in",
+    "bgm_path":"data/input/bgm.mp3",
+    "bgm_volume":0.15
+  }'
+```
+
+2. 이미지 업로드(멀티파트)
+
+```bash
+curl -X POST http://localhost:8000/api/v1/projects/<project_id>/assets \
+  -F "order_index=0" \
+  -F "file=@data/input/pet1.jpg"
+```
+
+```bash
+curl -X POST http://localhost:8000/api/v1/projects/<project_id>/assets \
+  -F "order_index=1" \
+  -F "file=@data/input/pet2.jpg"
+```
+
+3. 프로젝트 실행(원클릭)
+
+```bash
+curl -X POST http://localhost:8000/api/v1/projects/<project_id>/run \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+## 11. 주요 환경변수
 
 `.env.example` 기준:
 
@@ -209,8 +250,13 @@ curl -X POST http://localhost:8000/api/v1/jobs/pipeline \
 - `TRANSITION_MODEL_ID=<diffusers model id>`
 - `TRANSITION_MAX_ATTEMPTS=2`
 - `TRANSITION_GENERATION_STEP=8` (중간 프레임 생성 간격)
+- `STORAGE_ROOT=data/storage` (프로젝트 업로드 파일 저장 루트)
 
-## 11. 다음 구현 권장
+경로 정책:
+- API로 전달하는 입력/출력 경로는 `data/` 또는 `STORAGE_ROOT` 하위만 허용됩니다.
+- 경로가 허용 루트를 벗어나면 요청이 거부됩니다.
+
+## 12. 다음 구현 권장
 
 - 품질게이트 임계값과 타임아웃 정책 확정
 - 전환/렌더 단계의 품질게이트 지표 고도화

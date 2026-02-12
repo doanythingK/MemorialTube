@@ -67,3 +67,51 @@ class JobResponse(BaseModel):
     result_message: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+    transition_duration_seconds: Literal[6, 10] = 6
+    transition_prompt: str
+    transition_negative_prompt: str | None = None
+    last_clip_duration_seconds: int = Field(default=4, ge=2, le=20)
+    last_clip_motion_style: Literal["zoom_in", "zoom_out", "none"] = "zoom_in"
+    bgm_path: str | None = None
+    bgm_volume: float = Field(default=0.15, ge=0.0, le=1.0)
+    final_output_path: str | None = None
+
+
+class ProjectResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    status: str
+    transition_duration_seconds: int
+    transition_prompt: str
+    transition_negative_prompt: str | None
+    last_clip_duration_seconds: int
+    last_clip_motion_style: str
+    bgm_path: str | None
+    bgm_volume: float
+    final_output_path: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssetResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    order_index: int
+    file_name: str
+    file_path: str
+    width: int
+    height: int
+    created_at: datetime
+
+
+class ProjectRunRequest(BaseModel):
+    working_dir: str | None = None
+    final_output_path: str | None = None
