@@ -9,8 +9,10 @@ services:
     env_file:
       - .env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "8000:8000"
 
@@ -24,12 +26,19 @@ services:
     env_file:
       - .env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   redis:
     image: redis:7-alpine
     container_name: memorialtube-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     ports:
       - "6379:6379"
 
@@ -40,10 +49,13 @@ services:
       POSTGRES_DB: memorialtube
       POSTGRES_USER: memorialtube
       POSTGRES_PASSWORD: memorialtube
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memorialtube -d memorialtube"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
 volumes:
   postgres_data:
