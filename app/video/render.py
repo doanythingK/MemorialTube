@@ -16,6 +16,38 @@ def _validate_inputs(clip_paths: list[str]) -> None:
             raise FileNotFoundError(f"clip not found: {clip}")
 
 
+def _run_ffmpeg(cmd: list[str], error_message: str) -> None:
+    process = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if process.returncode != 0:
+        raise RuntimeError(process.stderr.strip() or error_message)
+
+
+def _normalize_clip(input_path: str, output_path: str) -> None:
+    """Normalize clip codec/size/fps before concat to avoid stream mismatch issues."""
+    vf = (
+        f"scale={settings.target_width}:{settings.target_height}:force_original_aspect_ratio=decrease,"
+        f"pad={settings.target_width}:{settings.target_height}:(ow-iw)/2:(oh-ih)/2:black,"
+        f"fps={settings.target_fps},setsar=1,format={settings.output_pixel_format}"
+    )
+    cmd = [
+        settings.ffmpeg_path,
+        "-y",
+        "-i",
+        str(Path(input_path).resolve()),
+        "-vf",
+        vf,
+        "-an",
+        "-r",
+        str(settings.target_fps),
+        "-pix_fmt",
+        settings.output_pixel_format,
+        "-c:v",
+        settings.output_video_codec,
+        str(Path(output_path).resolve()),
+    ]
+    _run_ffmpeg(cmd, "ffmpeg normalize clip failed")
+
+
 def build_final_render(
     clip_paths: list[str],
     output_path: str,
@@ -28,10 +60,16 @@ def build_final_render(
     out.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="render_concat_") as tmp_dir:
+        normalized_paths: list[Path] = []
+        for idx, clip in enumerate(clip_paths):
+            normalized = Path(tmp_dir) / f"norm_{idx:04d}.mp4"
+            _normalize_clip(clip, str(normalized))
+            normalized_paths.append(normalized)
+
         list_file = Path(tmp_dir) / "clips.txt"
         with list_file.open("w", encoding="utf-8") as fp:
-            for clip in clip_paths:
-                fp.write(f"file '{Path(clip).resolve().as_posix()}'\n")
+            for clip in normalized_paths:
+                fp.write(f"file '{clip.resolve().as_posix()}'\n")
 
         if bgm_path:
             bgm = Path(bgm_path)
@@ -89,8 +127,6 @@ def build_final_render(
                 str(out),
             ]
 
-        process = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if process.returncode != 0:
-            raise RuntimeError(process.stderr.strip() or "ffmpeg final render failed")
+        _run_ffmpeg(cmd, "ffmpeg final render failed")
 
     return str(out)

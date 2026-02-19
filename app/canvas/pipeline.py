@@ -53,7 +53,42 @@ def _resize_with_aspect(image_bgr: np.ndarray, target_w: int, target_h: int) -> 
     return resized, Placement(x=x, y=y, width=w1, height=h1)
 
 
-def _build_blurred_background(image_bgr: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
+def _build_safe_background(
+    image_bgr: np.ndarray,
+    resized_bgr: np.ndarray,
+    placement: Placement,
+    target_w: int,
+    target_h: int,
+) -> np.ndarray:
+    pad_left = placement.x
+    pad_right = target_w - (placement.x + placement.width)
+    pad_top = placement.y
+    pad_bottom = target_h - (placement.y + placement.height)
+
+    # If only left/right padding is needed, use reflect padding from the
+    # resized image so seam lines are minimized.
+    if pad_top == 0 and pad_bottom == 0 and (pad_left > 0 or pad_right > 0):
+        pad_mode = "reflect"
+        if placement.width <= 1 or pad_left >= placement.width or pad_right >= placement.width:
+            pad_mode = "edge"
+        safe = np.pad(
+            resized_bgr,
+            ((0, 0), (pad_left, pad_right), (0, 0)),
+            mode=pad_mode,
+        )
+        if safe.shape[1] == target_w and safe.shape[0] == target_h:
+            style = settings.canvas_background_style.lower().strip()
+            if style == "blur":
+                radius = max(0, int(settings.canvas_background_blur_radius))
+                if radius > 0:
+                    safe = np.array(
+                        Image.fromarray(safe[:, :, ::-1], mode="RGB").filter(
+                            ImageFilter.GaussianBlur(radius=radius)
+                        ),
+                        dtype=np.uint8,
+                    )[:, :, ::-1]
+            return safe
+
     pil = Image.fromarray(image_bgr[:, :, ::-1], mode="RGB")
     w, h = pil.size
     s = max(target_w / w, target_h / h)
@@ -64,8 +99,13 @@ def _build_blurred_background(image_bgr: np.ndarray, target_w: int, target_h: in
     left = (cover_w - target_w) // 2
     top = (cover_h - target_h) // 2
     cropped = cover.crop((left, top, left + target_w, top + target_h))
-    blurred = cropped.filter(ImageFilter.GaussianBlur(radius=22))
-    return np.array(blurred, dtype=np.uint8)[:, :, ::-1]
+
+    style = settings.canvas_background_style.lower().strip()
+    if style == "blur":
+        radius = max(0, int(settings.canvas_background_blur_radius))
+        if radius > 0:
+            cropped = cropped.filter(ImageFilter.GaussianBlur(radius=radius))
+    return np.array(cropped, dtype=np.uint8)[:, :, ::-1]
 
 
 def _compose_center(background_bgr: np.ndarray, resized_bgr: np.ndarray, placement: Placement) -> np.ndarray:
@@ -73,7 +113,40 @@ def _compose_center(background_bgr: np.ndarray, resized_bgr: np.ndarray, placeme
     y1, y2 = placement.y, placement.y + placement.height
     x1, x2 = placement.x, placement.x + placement.width
     canvas[y1:y2, x1:x2] = resized_bgr
-    return canvas
+
+    blend_px = max(0, int(settings.canvas_edge_blend_px))
+    if blend_px == 0:
+        return canvas
+
+    h, w = canvas.shape[:2]
+    if x1 <= 0 and x2 >= w:
+        return canvas
+
+    alpha = np.zeros((h, w), dtype=np.float32)
+    alpha[y1:y2, x1:x2] = 1.0
+
+    if x1 > 0:
+        b = min(blend_px, x1, max(1, placement.width // 2))
+        start = x1 - b
+        end = x1 + b
+        if end > start:
+            grad = np.linspace(0.0, 1.0, end - start, endpoint=True, dtype=np.float32)
+            alpha[y1:y2, start:end] = grad[None, :]
+
+    if x2 < w:
+        b = min(blend_px, w - x2, max(1, placement.width // 2))
+        start = x2 - b
+        end = x2 + b
+        if end > start:
+            grad = np.linspace(1.0, 0.0, end - start, endpoint=True, dtype=np.float32)
+            alpha[y1:y2, start:end] = grad[None, :]
+
+    alpha_3d = alpha[:, :, None]
+    blended = (
+        canvas.astype(np.float32) * alpha_3d
+        + background_bgr.astype(np.float32) * (1.0 - alpha_3d)
+    )
+    return np.clip(np.round(blended), 0, 255).astype(np.uint8)
 
 
 def _make_masks(target_w: int, target_h: int, placement: Placement) -> tuple[np.ndarray, np.ndarray]:
@@ -107,7 +180,13 @@ def build_canvas_image(
     source_bgr = _load_bgr(input_path)
     resized_bgr, placement = _resize_with_aspect(source_bgr, target_w, target_h)
 
-    safe_background = _build_blurred_background(source_bgr, target_w, target_h)
+    safe_background = _build_safe_background(
+        source_bgr,
+        resized_bgr,
+        placement,
+        target_w,
+        target_h,
+    )
     safe_canvas = _compose_center(safe_background, resized_bgr, placement)
 
     # Outpaint is only attempted on left/right gaps and only when content width is enough.
@@ -115,6 +194,7 @@ def build_canvas_image(
         return CanvasBuildResult(
             image=safe_canvas,
             used_outpaint=False,
+            adapter_name="none",
             fallback_applied=True,
             fallback_reason="outpaint skipped by width policy",
             safety_passed=True,
@@ -125,7 +205,8 @@ def build_canvas_image(
     protected_mask, generation_mask = _make_masks(target_w, target_h, placement)
 
     adapter = outpaint_adapter or create_default_outpaint_adapter()
-    detector = animal_detector or create_default_detector()
+    adapter_name = type(adapter).__name__
+    detector: AnimalDetector | None = animal_detector
     last_reason = "unknown outpaint failure"
     attempts = max(1, settings.outpaint_max_attempts)
 
@@ -147,6 +228,8 @@ def build_canvas_image(
 
         # Deterministic placeholder adapter does not synthesize new entities.
         if not isinstance(adapter, MirrorOutpaintAdapter):
+            if detector is None:
+                detector = create_default_detector()
             animal_check = check_no_new_animals_in_generated_region(
                 candidate,
                 generation_mask,
@@ -157,9 +240,24 @@ def build_canvas_image(
                 last_reason = animal_check.reason or "new-animal safety check failed"
                 continue
 
+        if isinstance(adapter, MirrorOutpaintAdapter):
+            return CanvasBuildResult(
+                image=safe_canvas,
+                used_outpaint=False,
+                adapter_name=adapter_name,
+                fallback_applied=True,
+                fallback_reason=(
+                    "mirror adapter selected; forced safe background fallback "
+                    "(generative outpaint unavailable)"
+                ),
+                safety_passed=True,
+                safety_message="safe fallback applied (mirror output blocked)",
+            )
+
         return CanvasBuildResult(
             image=candidate,
             used_outpaint=True,
+            adapter_name=adapter_name,
             fallback_applied=False,
             fallback_reason=None,
             safety_passed=True,
@@ -169,6 +267,7 @@ def build_canvas_image(
     return CanvasBuildResult(
         image=safe_canvas,
         used_outpaint=True,
+        adapter_name=adapter_name,
         fallback_applied=True,
         fallback_reason=last_reason,
         safety_passed=False,

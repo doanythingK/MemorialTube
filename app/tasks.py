@@ -1,5 +1,11 @@
+import json
+import logging
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib import error as urllib_error
+from urllib import request as urllib_request
+from urllib.parse import quote
 
 from sqlalchemy.orm import Session
 
@@ -13,6 +19,8 @@ from app.pipeline.orchestrator import run_full_pipeline
 from app.video.last_clip import build_last_clip
 from app.video.render import build_final_render
 from app.video.transition import build_transition_clip
+
+logger = logging.getLogger(__name__)
 
 
 class JobCanceledError(RuntimeError):
@@ -45,6 +53,25 @@ def _ensure_not_canceled(db: Session, job_id: str) -> None:
 def _begin_processing(db: Session, job_id: str) -> None:
     _ensure_not_canceled(db, job_id)
     crud.set_job_status(db, job_id, JobStatus.PROCESSING)
+
+
+def _send_callback(callback_uri: str, payload: dict[str, object]) -> tuple[bool, str]:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib_request.Request(
+        callback_uri,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=8) as resp:  # noqa: S310 - callback URL is user-provided
+            status_code = getattr(resp, "status", None) or resp.getcode()
+        return True, f"callback sent (status={status_code})"
+    except urllib_error.HTTPError as exc:
+        return False, f"callback http error (status={exc.code})"
+    except Exception as exc:  # noqa: BLE001 - callback must not fail the whole job
+        logger.exception("Callback request failed")
+        return False, f"callback failed: {exc}"
 
 
 @celery_app.task(name="app.tasks.run_test_render")
@@ -98,6 +125,7 @@ def run_canvas_render(job_id: str, input_path: str, output_path: str) -> dict[st
 
         message = (
             f"canvas done: outpaint={result.used_outpaint}, "
+            f"adapter={result.adapter_name}, "
             f"fallback={result.fallback_applied}, "
             f"safety={result.safety_passed}, "
             f"reason={result.fallback_reason or 'none'}"
@@ -218,6 +246,7 @@ def run_final_render(
     output_path: str,
     bgm_path: str | None = None,
     bgm_volume: float = 0.15,
+    callback_uri: str | None = None,
 ) -> dict[str, str]:
     db = SessionLocal()
     try:
@@ -245,6 +274,23 @@ def run_final_render(
             JobStatus.SUCCEEDED,
             result_message=message,
         )
+        if callback_uri:
+            _update_progress(db, job_id, stage="render_callback", progress=100, detail="sending callback")
+            output_file_name = Path(built).name
+            download_uri = (
+                f"{settings.public_base_url.rstrip('/')}/api/v1/jobs/render/output/{quote(output_file_name)}"
+            )
+            callback_payload: dict[str, object] = {
+                "job_id": job_id,
+                "status": JobStatus.SUCCEEDED.value,
+                "output_path": built,
+                "download_uri": download_uri,
+                "result_message": message,
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            }
+            ok, callback_msg = _send_callback(callback_uri, callback_payload)
+            stage = "render_callback_done" if ok else "render_callback_failed"
+            _update_progress(db, job_id, stage=stage, progress=100, detail=callback_msg)
         return {"job_id": job_id, "result": message}
     except Exception as exc:  # noqa: BLE001 - worker failure must be captured
         crud.set_job_status(db, job_id, JobStatus.FAILED, error_message=str(exc))

@@ -9,6 +9,7 @@ import numpy as np
 class CanvasBuildResult:
     image: np.ndarray
     used_outpaint: bool
+    adapter_name: str
     fallback_applied: bool
     fallback_reason: str | None
     safety_passed: bool

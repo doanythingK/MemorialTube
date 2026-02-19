@@ -78,6 +78,13 @@ Docker로 AI 의존성까지 설치하려면:
 docker compose -f docker-compose.local.yml build --build-arg INSTALL_AI=1
 ```
 
+`MT5Tokenizer` 관련 import 오류가 나오면(예: `cannot import name 'MT5Tokenizer'`), 아래 복구 스크립트를 실행하세요.
+
+```bash
+chmod +x scripts/fix_ai_env.sh
+./scripts/fix_ai_env.sh
+```
+
 ## 4. 테스트 작업 실행
 
 1. 테스트 Job 생성
@@ -138,6 +145,7 @@ curl http://localhost:8000/api/v1/jobs/<job_id>
 `result_message`에서 아래 정보를 확인할 수 있습니다.
 
 - `outpaint=true/false`
+- `adapter=<DiffusersOutpaintAdapter|MirrorOutpaintAdapter|none>`
 - `fallback=true/false`
 - `safety=true/false`
 - `reason=<fallback reason>`
@@ -152,6 +160,7 @@ curl http://localhost:8000/api/v1/jobs/<job_id>
 주의:
 - 동물 감지 모델이 로드되지 않은 상태에서 `STRICT_SAFETY_CHECKS=true`이면 생성형 Outpainting은 안전검증에서 실패하고 폴백됩니다.
 - `OUTPAINT_PROVIDER=auto`는 `diffusers` 로딩 실패 시 `mirror`로 자동 폴백합니다.
+- `MirrorOutpaintAdapter`가 선택되면 미러 결과를 그대로 저장하지 않고 안전 배경 캔버스로 강제 폴백합니다.
 - `TRANSITION_PROVIDER=auto`는 생성형 전환 실패 시 2회 재시도 후 클래식 전환으로 자동 폴백합니다.
 
 ## 7. LastClipJob 실행
@@ -172,7 +181,7 @@ curl -X POST http://localhost:8000/api/v1/jobs/last-clip \
 ```bash
 curl -X POST http://localhost:8000/api/v1/jobs/render \
   -H "Content-Type: application/json" \
-  -d '{"clip_paths":["data/output/transition_1.mp4","data/output/transition_2.mp4","data/output/last_clip.mp4"],"output_path":"data/output/final.mp4"}'
+  -d '{"clip_paths":["data/output/transition_1.mp4","data/output/transition_2.mp4","data/output/last_clip.mp4"],"clip_orders":[2,1,3],"output_path":"data/output/final.mp4"}'
 ```
 
 BGM 포함 예시:
@@ -181,6 +190,44 @@ BGM 포함 예시:
 curl -X POST http://localhost:8000/api/v1/jobs/render \
   -H "Content-Type: application/json" \
   -d '{"clip_paths":["data/output/transition_1.mp4","data/output/transition_2.mp4","data/output/last_clip.mp4"],"output_path":"data/output/final.mp4","bgm_path":"data/input/bgm.mp3","bgm_volume":0.15}'
+```
+
+## 8.1 동영상 업로드 병합 화면
+
+브라우저에서 아래 주소를 열면 동영상 파일 업로드 후 병합 요청을 보낼 수 있습니다.
+
+```text
+http://127.0.0.1:8000/api/v1/jobs/render/upload-ui
+```
+
+화면에서:
+- 동영상 2개 이상 업로드
+- 영상 로우를 선택하면 해당 로우의 화살표가 나타나며, 그 화살표로 병합 순서 조정
+- (선택) BGM 업로드
+- 출력 파일명 입력
+- 병합 요청 후 Job 상태 자동 갱신 확인
+
+참고:
+- 업로드된 파일은 `data/input/uploads/render_ui/<요청ID>/`에 저장됩니다.
+- 결과 파일은 `data/output/`에 생성됩니다.
+- 결과 다운로드 주소 형식: `/api/v1/jobs/render/output/{file_name}`
+- `callback_uri`를 입력하면 병합 완료 시 `download_uri` 포함 JSON을 해당 URI로 POST 전송합니다.
+
+## 8.2 기타 업로드 화면
+
+업로드 화면 모음:
+
+```text
+http://127.0.0.1:8000/api/v1/jobs/upload-ui
+```
+
+개별 화면:
+
+```text
+http://127.0.0.1:8000/api/v1/jobs/canvas/upload-ui
+http://127.0.0.1:8000/api/v1/jobs/transition/upload-ui
+http://127.0.0.1:8000/api/v1/jobs/last-clip/upload-ui
+http://127.0.0.1:8000/api/v1/jobs/pipeline/upload-ui
 ```
 
 ## 9. PipelineJob 실행 (원클릭 전체 생성)
@@ -261,7 +308,11 @@ curl -X POST http://localhost:8000/api/v1/projects/<project_id>/cancel
 - `OUTPAINT_PROVIDER=auto|diffusers|mirror`
 - `OUTPAINT_MODEL_ID=<diffusers model id>`
 - `OUTPAINT_DEVICE=auto|cpu|cuda`
+- `OUTPAINT_MIN_WIDTH_FOR_GENERATION=640` (이 폭 미만은 outpaint 스킵 후 안전 배경 사용)
 - `OUTPAINT_MAX_ATTEMPTS=2`
+- `CANVAS_BACKGROUND_STYLE=cover|blur` (기본 `cover`, `blur`는 블러 패딩)
+- `CANVAS_BACKGROUND_BLUR_RADIUS=22` (`CANVAS_BACKGROUND_STYLE=blur`일 때 사용)
+- `CANVAS_EDGE_BLEND_PX=24` (중앙 원본과 좌우 배경 경계 블렌딩 폭)
 - `ANIMAL_DETECTOR_PROVIDER=auto|ultralytics|transformers|null`
 - `ANIMAL_DETECTOR_MODEL=<model id or path>`
 - `STRICT_SAFETY_CHECKS=true|false`
@@ -280,6 +331,27 @@ curl -X POST http://localhost:8000/api/v1/projects/<project_id>/cancel
 - `GET /api/v1/jobs/{job_id}/runtime`: runtime 상세만 조회
 - `POST /api/v1/jobs/{job_id}/cancel`: 개별 작업 취소 요청
 - `POST /api/v1/projects/{project_id}/cancel`: 프로젝트의 현재 실행 작업 취소 요청
+- `POST /api/v1/jobs/render/upload`: 동영상 multipart 업로드 + 병합 Job 등록
+  - form 필드 `callback_uri`(선택): 완료 시 콜백 받을 URI
+  - form 필드 `clip_orders`(선택): 업로드한 `clips`와 1:1 매칭되는 정수 순서값(중복 불가)
+- `POST /api/v1/jobs/canvas/upload`: 이미지 업로드 + Canvas Job 등록
+- `POST /api/v1/jobs/transition/upload`: 이미지 2장 업로드 + Transition Job 등록
+- `POST /api/v1/jobs/last-clip/upload`: 이미지 업로드 + LastClip Job 등록
+- `POST /api/v1/jobs/pipeline/upload`: 이미지들 업로드 + Pipeline Job 등록
+- `GET /api/v1/jobs/output/{file_name}`: `data/output` 산출물 다운로드
+
+콜백 payload 예시(병합 완료 시):
+
+```json
+{
+  "job_id": "xxxx",
+  "status": "succeeded",
+  "output_path": "/abs/path/data/output/final.mp4",
+  "download_uri": "http://127.0.0.1:8000/api/v1/jobs/render/output/final.mp4",
+  "result_message": "final render done: ...",
+  "timestamp_utc": "2026-02-19T02:10:00.000000+00:00"
+}
+```
 
 주요 `stage` 예시:
 - CanvasJob: `canvas_start` -> `canvas_generate` -> `canvas_validate` -> `canvas_done`

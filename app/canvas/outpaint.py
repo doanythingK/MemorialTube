@@ -72,7 +72,6 @@ class DiffusersOutpaintAdapter:
 
     def __init__(self) -> None:
         import torch  # noqa: PLC0415 - optional dependency
-        from diffusers import AutoPipelineForInpainting  # noqa: PLC0415 - optional dependency
 
         self._torch = torch
         device = settings.outpaint_device.lower().strip()
@@ -81,13 +80,24 @@ class DiffusersOutpaintAdapter:
         self._device = device
 
         dtype = torch.float16 if device == "cuda" else torch.float32
-        self._pipe = AutoPipelineForInpainting.from_pretrained(
-            settings.outpaint_model_id,
-            torch_dtype=dtype,
-        )
+        # Use Stable Diffusion inpaint pipeline directly.
+        # AutoPipeline can import optional pipeline modules and fail due to
+        # unrelated dependency issues (for example MT5Tokenizer import path).
+        try:
+            from diffusers import StableDiffusionInpaintPipeline  # noqa: PLC0415
+
+            pipeline = StableDiffusionInpaintPipeline.from_pretrained(
+                settings.outpaint_model_id,
+                torch_dtype=dtype,
+            )
+        except Exception as exc:  # noqa: BLE001 - optional dependency/model load failure
+            raise RuntimeError(f"StableDiffusionInpaintPipeline failed: {exc}") from exc
+
+        self._pipe = pipeline
         self._pipe.to(device)
-        self._pipe.set_progress_bar_config(disable=True)
-        if device == "cuda":
+        if hasattr(self._pipe, "set_progress_bar_config"):
+            self._pipe.set_progress_bar_config(disable=True)
+        if device == "cuda" and hasattr(self._pipe, "enable_attention_slicing"):
             self._pipe.enable_attention_slicing()
 
     def outpaint(self, base_image_bgr: np.ndarray, generation_mask: np.ndarray) -> np.ndarray:
@@ -116,6 +126,10 @@ class DiffusersOutpaintAdapter:
 
 
 @lru_cache(maxsize=1)
+def _create_cached_diffusers_adapter() -> DiffusersOutpaintAdapter:
+    return DiffusersOutpaintAdapter()
+
+
 def create_default_outpaint_adapter() -> OutpaintAdapter:
     provider = settings.outpaint_provider.lower().strip()
 
@@ -124,7 +138,7 @@ def create_default_outpaint_adapter() -> OutpaintAdapter:
 
     if provider in {"diffusers", "auto"}:
         try:
-            return DiffusersOutpaintAdapter()
+            return _create_cached_diffusers_adapter()
         except Exception:  # noqa: BLE001 - optional dependency/model load failure
             if provider == "diffusers":
                 raise

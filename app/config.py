@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"
     ffmpeg_path: str = "ffmpeg"
+    public_base_url: str = "http://127.0.0.1:8000"
 
     target_width: int = 1600
     target_height: int = 900
@@ -19,9 +20,12 @@ class Settings(BaseSettings):
     output_pixel_format: str = "yuv420p"
     output_video_codec: str = "libx264"
     strict_safety_checks: bool = True
-    outpaint_min_width_for_generation: int = 900
+    outpaint_min_width_for_generation: int = 640
     outpaint_max_attempts: int = 2
     transition_max_attempts: int = 2
+    canvas_background_style: str = "cover"  # cover|blur
+    canvas_background_blur_radius: int = 22
+    canvas_edge_blend_px: int = 24
 
     outpaint_provider: str = "auto"  # auto|diffusers|mirror
     outpaint_model_id: str = "stabilityai/stable-diffusion-2-inpainting"

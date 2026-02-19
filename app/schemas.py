@@ -33,9 +33,11 @@ class LastClipJobCreateRequest(BaseModel):
 
 class RenderJobCreateRequest(BaseModel):
     clip_paths: list[str] = Field(min_length=1)
+    clip_orders: list[int] | None = None
     output_path: str
     bgm_path: str | None = None
     bgm_volume: float = Field(default=0.15, ge=0.0, le=1.0)
+    callback_uri: str | None = None
 
 
 class PipelineJobCreateRequest(BaseModel):
@@ -55,6 +57,39 @@ class JobEnqueueResponse(BaseModel):
     job_id: str
     task_id: str
     status: JobStatus
+
+
+class RenderUploadEnqueueResponse(JobEnqueueResponse):
+    output_path: str
+    clip_count: int
+    clip_orders: list[int]
+    callback_uri: str | None = None
+
+
+class CanvasUploadEnqueueResponse(JobEnqueueResponse):
+    input_path: str
+    output_path: str
+
+
+class TransitionUploadEnqueueResponse(JobEnqueueResponse):
+    image_a_path: str
+    image_b_path: str
+    output_path: str
+    duration_seconds: int
+
+
+class LastClipUploadEnqueueResponse(JobEnqueueResponse):
+    input_path: str
+    output_path: str
+    duration_seconds: int
+    motion_style: str
+
+
+class PipelineUploadEnqueueResponse(JobEnqueueResponse):
+    image_count: int
+    working_dir: str
+    output_path: str
+    bgm_path: str | None = None
 
 
 class JobRuntimeResponse(BaseModel):
