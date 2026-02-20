@@ -108,7 +108,13 @@ def run_test_render(job_id: str) -> dict[str, str]:
 
 
 @celery_app.task(name="app.tasks.run_canvas_render")
-def run_canvas_render(job_id: str, input_path: str, output_path: str) -> dict[str, str]:
+def run_canvas_render(
+    job_id: str,
+    input_path: str,
+    output_path: str,
+    fast_mode: bool = False,
+    enable_animal_detection: bool = True,
+) -> dict[str, str]:
     db = SessionLocal()
     try:
         _begin_processing(db, job_id)
@@ -119,13 +125,20 @@ def run_canvas_render(job_id: str, input_path: str, output_path: str) -> dict[st
         output.parent.mkdir(parents=True, exist_ok=True)
 
         _update_progress(db, job_id, stage="canvas_generate", progress=45, detail="running outpainting/padding")
-        result = run_canvas_job(input_path=input_path, output_path=output_path)
+        result = run_canvas_job(
+            input_path=input_path,
+            output_path=output_path,
+            fast_mode=fast_mode,
+            enable_animal_detection=enable_animal_detection,
+        )
         _update_progress(db, job_id, stage="canvas_validate", progress=85, detail="running safety checks")
         _ensure_not_canceled(db, job_id)
 
         message = (
             f"canvas done: outpaint={result.used_outpaint}, "
             f"adapter={result.adapter_name}, "
+            f"fast_mode={bool(fast_mode)}, "
+            f"animal_detection={bool(enable_animal_detection)}, "
             f"fallback={result.fallback_applied}, "
             f"safety={result.safety_passed}, "
             f"reason={result.fallback_reason or 'none'}"

@@ -12,6 +12,8 @@ from app.canvas.outpaint import (
     create_default_outpaint_adapter,
 )
 from app.canvas.safety import (
+    check_generation_boundary_continuity,
+    check_generated_region_naturalness,
     check_no_new_animals_in_generated_region,
     check_protected_region_unchanged,
 )
@@ -60,14 +62,19 @@ def _build_safe_background(
     target_w: int,
     target_h: int,
 ) -> np.ndarray:
+    style = settings.canvas_background_style.lower().strip()
     pad_left = placement.x
     pad_right = target_w - (placement.x + placement.width)
     pad_top = placement.y
     pad_bottom = target_h - (placement.y + placement.height)
 
-    # If only left/right padding is needed, use reflect padding from the
-    # resized image so seam lines are minimized.
-    if pad_top == 0 and pad_bottom == 0 and (pad_left > 0 or pad_right > 0):
+    # Reflect padding is opt-in only; default style should avoid mirrored look.
+    if (
+        style == "reflect"
+        and pad_top == 0
+        and pad_bottom == 0
+        and (pad_left > 0 or pad_right > 0)
+    ):
         pad_mode = "reflect"
         if placement.width <= 1 or pad_left >= placement.width or pad_right >= placement.width:
             pad_mode = "edge"
@@ -77,16 +84,6 @@ def _build_safe_background(
             mode=pad_mode,
         )
         if safe.shape[1] == target_w and safe.shape[0] == target_h:
-            style = settings.canvas_background_style.lower().strip()
-            if style == "blur":
-                radius = max(0, int(settings.canvas_background_blur_radius))
-                if radius > 0:
-                    safe = np.array(
-                        Image.fromarray(safe[:, :, ::-1], mode="RGB").filter(
-                            ImageFilter.GaussianBlur(radius=radius)
-                        ),
-                        dtype=np.uint8,
-                    )[:, :, ::-1]
             return safe
 
     pil = Image.fromarray(image_bgr[:, :, ::-1], mode="RGB")
@@ -100,7 +97,6 @@ def _build_safe_background(
     top = (cover_h - target_h) // 2
     cropped = cover.crop((left, top, left + target_w, top + target_h))
 
-    style = settings.canvas_background_style.lower().strip()
     if style == "blur":
         radius = max(0, int(settings.canvas_background_blur_radius))
         if radius > 0:
@@ -167,11 +163,63 @@ def _make_masks(target_w: int, target_h: int, placement: Placement) -> tuple[np.
     return protected, generation
 
 
+def _preserve_protected_region(
+    base_image_bgr: np.ndarray,
+    candidate_image_bgr: np.ndarray,
+    protected_mask: np.ndarray,
+) -> np.ndarray:
+    preserved = candidate_image_bgr.copy()
+    region = protected_mask > 0
+    if region.any():
+        preserved[region] = base_image_bgr[region]
+    return preserved
+
+
+def _harmonize_generated_region(
+    candidate_image_bgr: np.ndarray,
+    safe_canvas_bgr: np.ndarray,
+    generation_mask: np.ndarray,
+    placement: Placement,
+) -> np.ndarray:
+    if generation_mask.shape != candidate_image_bgr.shape[:2]:
+        return candidate_image_bgr
+
+    h, w = generation_mask.shape
+    right_start = placement.x + placement.width
+    left_width = max(0, placement.x)
+    right_width = max(0, w - right_start)
+
+    alpha = np.zeros((h, w), dtype=np.float32)
+
+    # Blend more near the protected boundary and less toward the outer edge.
+    if left_width > 0:
+        left_ramp = np.linspace(0.20, 0.50, left_width, endpoint=True, dtype=np.float32)
+        alpha[:, :left_width] = left_ramp[None, :]
+
+    if right_width > 0:
+        right_ramp = np.linspace(0.50, 0.20, right_width, endpoint=True, dtype=np.float32)
+        alpha[:, right_start:] = right_ramp[None, :]
+
+    region = generation_mask > 0
+    if not region.any():
+        return candidate_image_bgr
+
+    alpha *= region.astype(np.float32)
+    a3 = alpha[:, :, None]
+    mixed = (
+        candidate_image_bgr.astype(np.float32) * (1.0 - a3)
+        + safe_canvas_bgr.astype(np.float32) * a3
+    )
+    return np.clip(np.round(mixed), 0, 255).astype(np.uint8)
+
+
 def build_canvas_image(
     input_path: str,
     *,
     outpaint_adapter: OutpaintAdapter | None = None,
     animal_detector: AnimalDetector | None = None,
+    fast_mode: bool = False,
+    enable_animal_detection: bool = True,
 ) -> CanvasBuildResult:
     target_w = settings.target_width
     target_h = settings.target_height
@@ -208,36 +256,80 @@ def build_canvas_image(
     adapter_name = type(adapter).__name__
     detector: AnimalDetector | None = animal_detector
     last_reason = "unknown outpaint failure"
-    attempts = max(1, settings.outpaint_max_attempts)
+    attempts = 1 if fast_mode else max(1, settings.outpaint_max_attempts)
+    outpaint_steps = 12 if fast_mode else settings.outpaint_num_inference_steps
 
     for _attempt in range(1, attempts + 1):
         try:
-            candidate = adapter.outpaint(base_for_generation, generation_mask)
+            candidate = adapter.outpaint(
+                base_for_generation,
+                generation_mask,
+                num_inference_steps=outpaint_steps,
+                fast_mode=fast_mode,
+            )
         except Exception as exc:  # noqa: BLE001 - model adapter error path
             last_reason = f"outpaint execution failed: {exc}"
             continue
 
-        protected_check = check_protected_region_unchanged(
+        # Preserve the original subject region exactly before safety checks.
+        candidate = _preserve_protected_region(
             base_for_generation,
             candidate,
             protected_mask,
         )
+
+        if fast_mode:
+            candidate = _harmonize_generated_region(
+                candidate,
+                safe_canvas,
+                generation_mask,
+                placement,
+            )
+
+        try:
+            protected_check = check_protected_region_unchanged(
+                base_for_generation,
+                candidate,
+                protected_mask,
+            )
+        except ValueError as exc:
+            last_reason = f"protected region safety check error: {exc}"
+            continue
         if not protected_check.passed:
             last_reason = protected_check.reason or "protected region safety check failed"
             continue
 
         # Deterministic placeholder adapter does not synthesize new entities.
         if not isinstance(adapter, MirrorOutpaintAdapter):
-            if detector is None:
-                detector = create_default_detector()
-            animal_check = check_no_new_animals_in_generated_region(
+            if enable_animal_detection:
+                if detector is None:
+                    detector = create_default_detector()
+                animal_check = check_no_new_animals_in_generated_region(
+                    candidate,
+                    generation_mask,
+                    detector,
+                    strict_mode=strict,
+                )
+                if not animal_check.passed:
+                    last_reason = animal_check.reason or "new-animal safety check failed"
+                    continue
+
+            boundary_check = check_generation_boundary_continuity(
                 candidate,
+                protected_mask,
                 generation_mask,
-                detector,
-                strict_mode=strict,
             )
-            if not animal_check.passed:
-                last_reason = animal_check.reason or "new-animal safety check failed"
+            if not boundary_check.passed:
+                last_reason = boundary_check.reason or "generation boundary safety check failed"
+                continue
+
+            naturalness_check = check_generated_region_naturalness(
+                candidate,
+                protected_mask,
+                generation_mask,
+            )
+            if not naturalness_check.passed:
+                last_reason = naturalness_check.reason or "generated region naturalness check failed"
                 continue
 
         if isinstance(adapter, MirrorOutpaintAdapter):
@@ -275,7 +367,17 @@ def build_canvas_image(
     )
 
 
-def run_canvas_job(input_path: str, output_path: str) -> CanvasBuildResult:
-    result = build_canvas_image(input_path)
+def run_canvas_job(
+    input_path: str,
+    output_path: str,
+    *,
+    fast_mode: bool = False,
+    enable_animal_detection: bool = True,
+) -> CanvasBuildResult:
+    result = build_canvas_image(
+        input_path,
+        fast_mode=fast_mode,
+        enable_animal_detection=enable_animal_detection,
+    )
     _save_bgr(output_path, result.image)
     return result

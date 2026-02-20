@@ -133,8 +133,16 @@ mkdir -p data/input data/output
 ```bash
 curl -X POST http://localhost:8000/api/v1/jobs/canvas \
   -H "Content-Type: application/json" \
-  -d '{"input_path":"data/input/pet1.jpg","output_path":"data/output/pet1_canvas.jpg"}'
+  -d '{"input_path":"data/input/pet1.jpg","output_path":"data/output/pet1_canvas.jpg","fast_mode":false,"animal_detection":true}'
 ```
+
+옵션 설명:
+- `fast_mode=true`: outpainting step을 `12`로 고정
+- `fast_mode=true`: outpainting 재시도 횟수를 `1회`로 제한(빠른 종료)
+- `fast_mode=true`: outpainting 생성 해상도 긴 변을 `OUTPAINT_FAST_MAX_SIDE`(기본 640)로 제한 후 결과를 원본 캔버스로 복원
+- `fast_mode=false`: 기존 설정값(`OUTPAINT_NUM_INFERENCE_STEPS`) 사용
+- `animal_detection=true`: 동물 검출 안전검사 사용
+- `animal_detection=false`: 동물 검출 안전검사 미사용
 
 3. Job 조회
 
@@ -156,12 +164,16 @@ curl http://localhost:8000/api/v1/jobs/<job_id>
 2. Outpainting 실패 2회 시 안전 배경 패딩으로 폴백
 3. 생성형 전환 단계는 2회 실패 시 클래식 전환으로 폴백
 4. 생성 영역(좌/우 여백)에서 신규 생물 감지 시 실패 처리 후 폴백
+5. 생성 경계(원본-확장 영역) 이음새 위화감이 크면 실패 처리 후 폴백
+6. 늘어난 영역(좌/우 생성영역) 전체의 톤/질감이 인접 원본 영역과 크게 어긋나면 실패 처리 후 폴백
 
 주의:
 - 동물 감지 모델이 로드되지 않은 상태에서 `STRICT_SAFETY_CHECKS=true`이면 생성형 Outpainting은 안전검증에서 실패하고 폴백됩니다.
 - `OUTPAINT_PROVIDER=auto`는 `diffusers` 로딩 실패 시 `mirror`로 자동 폴백합니다.
 - `MirrorOutpaintAdapter`가 선택되면 미러 결과를 그대로 저장하지 않고 안전 배경 캔버스로 강제 폴백합니다.
 - `TRANSITION_PROVIDER=auto`는 생성형 전환 실패 시 2회 재시도 후 클래식 전환으로 자동 폴백합니다.
+- `CANVAS_BACKGROUND_STYLE=reflect`를 명시하지 않으면, 안전 배경은 미러 패턴 대신 `cover`(또는 `blur`)로 생성됩니다.
+- Outpainting 판단은 내용 종류(예: 꽃 유무) 자체를 금지하지 않고, 경계 위화감 + 생성영역 전체 자연스러움 기준으로 수행됩니다.
 
 ## 7. LastClipJob 실행
 
@@ -335,6 +347,8 @@ curl -X POST http://localhost:8000/api/v1/projects/<project_id>/cancel
   - form 필드 `callback_uri`(선택): 완료 시 콜백 받을 URI
   - form 필드 `clip_orders`(선택): 업로드한 `clips`와 1:1 매칭되는 정수 순서값(중복 불가)
 - `POST /api/v1/jobs/canvas/upload`: 이미지 업로드 + Canvas Job 등록
+  - form 필드 `fast_mode`(선택, 기본 `false`)
+  - form 필드 `animal_detection`(선택, 기본 `true`)
 - `POST /api/v1/jobs/transition/upload`: 이미지 2장 업로드 + Transition Job 등록
 - `POST /api/v1/jobs/last-clip/upload`: 이미지 업로드 + LastClip Job 등록
 - `POST /api/v1/jobs/pipeline/upload`: 이미지들 업로드 + Pipeline Job 등록

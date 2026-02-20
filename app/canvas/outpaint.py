@@ -14,6 +14,9 @@ class OutpaintAdapter(Protocol):
         self,
         base_image_bgr: np.ndarray,
         generation_mask: np.ndarray,
+        *,
+        num_inference_steps: int | None = None,
+        fast_mode: bool = False,
     ) -> np.ndarray:
         """Return outpainted image.
 
@@ -28,7 +31,16 @@ class MirrorOutpaintAdapter:
     executed end-to-end before wiring a real model.
     """
 
-    def outpaint(self, base_image_bgr: np.ndarray, generation_mask: np.ndarray) -> np.ndarray:
+    def outpaint(
+        self,
+        base_image_bgr: np.ndarray,
+        generation_mask: np.ndarray,
+        *,
+        num_inference_steps: int | None = None,
+        fast_mode: bool = False,
+    ) -> np.ndarray:
+        _ = num_inference_steps
+        _ = fast_mode
         out = base_image_bgr.copy()
         h, w = out.shape[:2]
 
@@ -100,12 +112,70 @@ class DiffusersOutpaintAdapter:
         if device == "cuda" and hasattr(self._pipe, "enable_attention_slicing"):
             self._pipe.enable_attention_slicing()
 
-    def outpaint(self, base_image_bgr: np.ndarray, generation_mask: np.ndarray) -> np.ndarray:
+    def outpaint(
+        self,
+        base_image_bgr: np.ndarray,
+        generation_mask: np.ndarray,
+        *,
+        num_inference_steps: int | None = None,
+        fast_mode: bool = False,
+    ) -> np.ndarray:
         if generation_mask.shape != base_image_bgr.shape[:2]:
             raise ValueError("generation_mask shape mismatch")
 
-        image = Image.fromarray(base_image_bgr[:, :, ::-1], mode="RGB")
-        mask = Image.fromarray(generation_mask, mode="L")
+        src_h, src_w = base_image_bgr.shape[:2]
+        proc_bgr = base_image_bgr
+        proc_mask = generation_mask
+        proc_w = src_w
+        proc_h = src_h
+
+        if fast_mode:
+            max_side = max(64, int(settings.outpaint_fast_max_side))
+            longest = max(src_w, src_h)
+            if longest > max_side:
+                scale = max_side / float(longest)
+                proc_w = max(8, int(round(src_w * scale)))
+                proc_h = max(8, int(round(src_h * scale)))
+                proc_w = max(8, (proc_w // 8) * 8)
+                proc_h = max(8, (proc_h // 8) * 8)
+                proc_bgr = np.array(
+                    Image.fromarray(base_image_bgr[:, :, ::-1], mode="RGB").resize(
+                        (proc_w, proc_h),
+                        Image.Resampling.LANCZOS,
+                    ),
+                    dtype=np.uint8,
+                )[:, :, ::-1]
+                proc_mask = np.array(
+                    Image.fromarray(generation_mask, mode="L").resize(
+                        (proc_w, proc_h),
+                        Image.Resampling.NEAREST,
+                    ),
+                    dtype=np.uint8,
+                )
+
+        gen_w = ((proc_w + 7) // 8) * 8
+        gen_h = ((proc_h + 7) // 8) * 8
+
+        if gen_w != proc_w or gen_h != proc_h:
+            pad_right = gen_w - proc_w
+            pad_bottom = gen_h - proc_h
+            padded_image_bgr = np.pad(
+                proc_bgr,
+                ((0, pad_bottom), (0, pad_right), (0, 0)),
+                mode="edge",
+            )
+            padded_mask = np.pad(
+                proc_mask,
+                ((0, pad_bottom), (0, pad_right)),
+                mode="constant",
+                constant_values=0,
+            )
+        else:
+            padded_image_bgr = proc_bgr
+            padded_mask = proc_mask
+
+        image = Image.fromarray(padded_image_bgr[:, :, ::-1], mode="RGB")
+        mask = Image.fromarray(padded_mask, mode="L")
 
         kwargs: dict[str, object] = {
             "prompt": settings.outpaint_prompt,
@@ -113,7 +183,13 @@ class DiffusersOutpaintAdapter:
             "image": image,
             "mask_image": mask,
             "guidance_scale": settings.outpaint_guidance_scale,
-            "num_inference_steps": settings.outpaint_num_inference_steps,
+            "num_inference_steps": (
+                int(num_inference_steps)
+                if num_inference_steps is not None
+                else settings.outpaint_num_inference_steps
+            ),
+            "width": gen_w,
+            "height": gen_h,
         }
         if settings.outpaint_seed is not None:
             kwargs["generator"] = self._torch.Generator(self._device).manual_seed(
@@ -122,7 +198,25 @@ class DiffusersOutpaintAdapter:
 
         result = self._pipe(**kwargs).images[0]
         out_rgb = np.array(result, dtype=np.uint8)
-        return out_rgb[:, :, ::-1]  # RGB -> BGR
+        if out_rgb.shape[:2] != (gen_h, gen_w):
+            out_rgb = np.array(
+                Image.fromarray(out_rgb, mode="RGB").resize(
+                    (gen_w, gen_h),
+                    Image.Resampling.LANCZOS,
+                ),
+                dtype=np.uint8,
+            )
+        out_bgr = out_rgb[:, :, ::-1]  # RGB -> BGR
+        out_bgr = out_bgr[:proc_h, :proc_w]
+        if proc_w != src_w or proc_h != src_h:
+            out_bgr = np.array(
+                Image.fromarray(out_bgr[:, :, ::-1], mode="RGB").resize(
+                    (src_w, src_h),
+                    Image.Resampling.LANCZOS,
+                ),
+                dtype=np.uint8,
+            )[:, :, ::-1]
+        return out_bgr
 
 
 @lru_cache(maxsize=1)

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     outpaint_min_width_for_generation: int = 640
     outpaint_max_attempts: int = 2
     transition_max_attempts: int = 2
-    canvas_background_style: str = "cover"  # cover|blur
+    canvas_background_style: str = "cover"  # cover|blur|reflect
     canvas_background_blur_radius: int = 22
     canvas_edge_blend_px: int = 24
 
@@ -31,11 +31,14 @@ class Settings(BaseSettings):
     outpaint_model_id: str = "stabilityai/stable-diffusion-2-inpainting"
     outpaint_device: str = "auto"  # auto|cpu|cuda
     outpaint_prompt: str = (
-        "clean memorial photo background extension, natural, soft light, seamless, no extra animals"
+        "clean memorial photo background extension, natural scene continuity, soft light, seamless, no extra animals"
     )
-    outpaint_negative_prompt: str = "extra animal, duplicate pet, distorted subject, text, watermark"
+    outpaint_negative_prompt: str = (
+        "extra animal, duplicate pet, distorted subject, text, watermark, harsh border"
+    )
     outpaint_guidance_scale: float = 7.0
     outpaint_num_inference_steps: int = 30
+    outpaint_fast_max_side: int = 640
     outpaint_seed: int | None = None
 
     animal_detector_provider: str = "auto"  # auto|ultralytics|transformers|null

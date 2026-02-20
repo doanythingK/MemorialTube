@@ -243,7 +243,13 @@ def enqueue_canvas_job(
     job = crud.create_job(db, job_type="canvas")
 
     try:
-        async_result = run_canvas_render.delay(job.id, input_path, output_path)
+        async_result = run_canvas_render.delay(
+            job.id,
+            input_path,
+            output_path,
+            payload.fast_mode,
+            payload.animal_detection,
+        )
     except Exception as exc:  # noqa: BLE001 - broker error path
         crud.set_job_status(db, job.id, JobStatus.FAILED, error_message=str(exc))
         raise HTTPException(status_code=500, detail="Failed to enqueue task") from exc
@@ -728,6 +734,20 @@ def canvas_upload_ui() -> HTMLResponse:
           <label for="image">이미지 파일</label>
           <input id="image" type="file" accept="image/*,.jpg,.jpeg,.png,.webp" />
         </div>
+        <div class="row">
+          <label for="fastMode">빠른 모드</label>
+          <select id="fastMode">
+            <option value="false" selected>기본(품질 우선)</option>
+            <option value="true">빠른 모드(steps=12)</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="animalDetection">동물 검출</label>
+          <select id="animalDetection">
+            <option value="true" selected>사용</option>
+            <option value="false">미사용</option>
+          </select>
+        </div>
         <div class="row full">
           <label for="outputName">출력 파일명 (선택)</label>
           <input id="outputName" type="text" placeholder="canvas_output.jpg" />
@@ -742,9 +762,13 @@ def canvas_upload_ui() -> HTMLResponse:
         return;
       }
       const outputName = document.getElementById("outputName").value;
+      const fastMode = document.getElementById("fastMode").value === "true";
+      const animalDetection = document.getElementById("animalDetection").value === "true";
       const form = new FormData();
       form.append("image", image);
       if (outputName) form.append("output_name", outputName);
+      form.append("fast_mode", String(fastMode));
+      form.append("animal_detection", String(animalDetection));
 
       btn.disabled = true;
       setState("요청 전송 중...");
@@ -776,6 +800,8 @@ def canvas_upload_ui() -> HTMLResponse:
 def enqueue_canvas_upload_job(
     image: UploadFile = File(...),
     output_name: str | None = Form(default=None),
+    fast_mode: bool = Form(default=False),
+    animal_detection: bool = Form(default=True),
     db: Session = Depends(get_db),
 ) -> CanvasUploadEnqueueResponse:
     ext = Path(image.filename or "").suffix.lower()
@@ -804,7 +830,13 @@ def enqueue_canvas_upload_job(
 
     job = crud.create_job(db, job_type="canvas_upload")
     try:
-        async_result = run_canvas_render.delay(job.id, input_path, output_path)
+        async_result = run_canvas_render.delay(
+            job.id,
+            input_path,
+            output_path,
+            fast_mode,
+            animal_detection,
+        )
     except Exception as exc:  # noqa: BLE001 - broker error path
         crud.set_job_status(db, job.id, JobStatus.FAILED, error_message=str(exc))
         raise HTTPException(status_code=500, detail="Failed to enqueue task") from exc
@@ -815,6 +847,8 @@ def enqueue_canvas_upload_job(
         status=job.status,
         input_path=input_path,
         output_path=output_path,
+        fast_mode=fast_mode,
+        animal_detection=animal_detection,
     )
 
 

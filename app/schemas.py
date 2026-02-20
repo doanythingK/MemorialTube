@@ -13,6 +13,8 @@ class JobCreateRequest(BaseModel):
 class CanvasJobCreateRequest(BaseModel):
     input_path: str
     output_path: str
+    fast_mode: bool = False
+    animal_detection: bool = True
 
 
 class TransitionJobCreateRequest(BaseModel):
@@ -69,6 +71,8 @@ class RenderUploadEnqueueResponse(JobEnqueueResponse):
 class CanvasUploadEnqueueResponse(JobEnqueueResponse):
     input_path: str
     output_path: str
+    fast_mode: bool
+    animal_detection: bool
 
 
 class TransitionUploadEnqueueResponse(JobEnqueueResponse):
