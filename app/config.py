@@ -40,7 +40,22 @@ class Settings(BaseSettings):
     outpaint_guidance_scale: float = 7.0
     outpaint_num_inference_steps: int = 30
     outpaint_fast_max_side: int = 640
+    outpaint_candidate_count: int = 3
+    outpaint_fast_candidate_count: int = 2
     outpaint_seed: int | None = None
+
+    # Safety threshold tuning
+    protected_max_changed_ratio: float = 0.001
+    protected_diff_threshold: int = 8
+    boundary_max_mean_diff: float = 52.0
+    boundary_max_p95_diff: float = 118.0
+    boundary_min_pair_count: int = 120
+    natural_ref_band_width: int = 72
+    natural_min_pixels_per_side: int = 1800
+    natural_max_mean_delta_norm: float = 0.58
+    natural_max_std_delta_norm: float = 0.52
+    natural_max_grad_ratio: float = 7.2
+    natural_max_edge_density_ratio: float = 9.0
 
     animal_detector_provider: str = "auto"  # auto|ultralytics|transformers|null
     animal_detector_model: str = "yolov8n.pt"
