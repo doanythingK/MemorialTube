@@ -15,6 +15,8 @@ class CanvasJobCreateRequest(BaseModel):
     output_path: str
     fast_mode: bool = False
     animal_detection: bool = True
+    outpaint_prompt: str | None = None
+    outpaint_negative_prompt: str | None = None
 
 
 class TransitionJobCreateRequest(BaseModel):
@@ -73,6 +75,8 @@ class CanvasUploadEnqueueResponse(JobEnqueueResponse):
     output_path: str
     fast_mode: bool
     animal_detection: bool
+    outpaint_prompt: str | None = None
+    outpaint_negative_prompt: str | None = None
 
 
 class TransitionUploadEnqueueResponse(JobEnqueueResponse):

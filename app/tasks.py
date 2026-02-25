@@ -114,6 +114,8 @@ def run_canvas_render(
     output_path: str,
     fast_mode: bool = False,
     enable_animal_detection: bool = True,
+    outpaint_prompt: str | None = None,
+    outpaint_negative_prompt: str | None = None,
 ) -> dict[str, str]:
     db = SessionLocal()
     try:
@@ -130,6 +132,8 @@ def run_canvas_render(
             output_path=output_path,
             fast_mode=fast_mode,
             enable_animal_detection=enable_animal_detection,
+            outpaint_prompt=outpaint_prompt,
+            outpaint_negative_prompt=outpaint_negative_prompt,
         )
         _update_progress(db, job_id, stage="canvas_validate", progress=85, detail="running safety checks")
         _ensure_not_canceled(db, job_id)
@@ -139,6 +143,8 @@ def run_canvas_render(
             f"adapter={result.adapter_name}, "
             f"fast_mode={bool(fast_mode)}, "
             f"animal_detection={bool(enable_animal_detection)}, "
+            f"prompt_override={bool(outpaint_prompt and outpaint_prompt.strip())}, "
+            f"negative_prompt_override={bool(outpaint_negative_prompt and outpaint_negative_prompt.strip())}, "
             f"fallback={result.fallback_applied}, "
             f"safety={result.safety_passed}, "
             f"reason={result.fallback_reason or 'none'}"

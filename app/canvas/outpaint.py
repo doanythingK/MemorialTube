@@ -17,6 +17,8 @@ class OutpaintAdapter(Protocol):
         *,
         num_inference_steps: int | None = None,
         fast_mode: bool = False,
+        prompt: str | None = None,
+        negative_prompt: str | None = None,
     ) -> np.ndarray:
         """Return outpainted image.
 
@@ -38,9 +40,13 @@ class MirrorOutpaintAdapter:
         *,
         num_inference_steps: int | None = None,
         fast_mode: bool = False,
+        prompt: str | None = None,
+        negative_prompt: str | None = None,
     ) -> np.ndarray:
         _ = num_inference_steps
         _ = fast_mode
+        _ = prompt
+        _ = negative_prompt
         out = base_image_bgr.copy()
         h, w = out.shape[:2]
 
@@ -119,6 +125,8 @@ class DiffusersOutpaintAdapter:
         *,
         num_inference_steps: int | None = None,
         fast_mode: bool = False,
+        prompt: str | None = None,
+        negative_prompt: str | None = None,
     ) -> np.ndarray:
         if generation_mask.shape != base_image_bgr.shape[:2]:
             raise ValueError("generation_mask shape mismatch")
@@ -178,8 +186,12 @@ class DiffusersOutpaintAdapter:
         mask = Image.fromarray(padded_mask, mode="L")
 
         kwargs: dict[str, object] = {
-            "prompt": settings.outpaint_prompt,
-            "negative_prompt": settings.outpaint_negative_prompt,
+            "prompt": prompt.strip() if prompt and prompt.strip() else settings.outpaint_prompt,
+            "negative_prompt": (
+                negative_prompt.strip()
+                if negative_prompt and negative_prompt.strip()
+                else settings.outpaint_negative_prompt
+            ),
             "image": image,
             "mask_image": mask,
             "guidance_scale": settings.outpaint_guidance_scale,
@@ -226,15 +238,23 @@ def _create_cached_diffusers_adapter() -> DiffusersOutpaintAdapter:
 
 def create_default_outpaint_adapter() -> OutpaintAdapter:
     provider = settings.outpaint_provider.lower().strip()
+    force_only = bool(settings.outpaint_force_only)
 
     if provider in {"mirror", "none"}:
+        if force_only:
+            raise RuntimeError(
+                "OUTPAINT_FORCE_ONLY=true requires generative outpaint provider "
+                f"(current provider={provider})"
+            )
         return MirrorOutpaintAdapter()
 
     if provider in {"diffusers", "auto"}:
         try:
             return _create_cached_diffusers_adapter()
-        except Exception:  # noqa: BLE001 - optional dependency/model load failure
-            if provider == "diffusers":
-                raise
+        except Exception as exc:  # noqa: BLE001 - optional dependency/model load failure
+            if provider == "diffusers" or force_only:
+                raise RuntimeError(f"Diffusers outpaint adapter load failed: {exc}") from exc
 
+    if force_only:
+        raise RuntimeError("OUTPAINT_FORCE_ONLY=true but no generative outpaint adapter available")
     return MirrorOutpaintAdapter()

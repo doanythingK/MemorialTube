@@ -133,7 +133,7 @@ mkdir -p data/input data/output
 ```bash
 curl -X POST http://localhost:8000/api/v1/jobs/canvas \
   -H "Content-Type: application/json" \
-  -d '{"input_path":"data/input/pet1.jpg","output_path":"data/output/pet1_canvas.jpg","fast_mode":false,"animal_detection":true}'
+  -d '{"input_path":"data/input/pet1.jpg","output_path":"data/output/pet1_canvas.jpg","fast_mode":false,"animal_detection":true,"outpaint_prompt":"natural grassy field continuation, soft daylight, seamless background","outpaint_negative_prompt":"extra animal, duplicate pet, harsh border"}'
 ```
 
 옵션 설명:
@@ -143,6 +143,8 @@ curl -X POST http://localhost:8000/api/v1/jobs/canvas \
 - `fast_mode=false`: 기존 설정값(`OUTPAINT_NUM_INFERENCE_STEPS`) 사용
 - `animal_detection=true`: 동물 검출 안전검사 사용
 - `animal_detection=false`: 동물 검출 안전검사 미사용
+- `outpaint_prompt`: 요청 단위 Outpainting 프롬프트(선택)
+- `outpaint_negative_prompt`: 요청 단위 Outpainting 네거티브 프롬프트(선택)
 
 3. Job 조회
 
@@ -174,6 +176,7 @@ curl http://localhost:8000/api/v1/jobs/<job_id>
 - `TRANSITION_PROVIDER=auto`는 생성형 전환 실패 시 2회 재시도 후 클래식 전환으로 자동 폴백합니다.
 - `CANVAS_BACKGROUND_STYLE=reflect`를 명시하지 않으면, 안전 배경은 미러 패턴 대신 `cover`(또는 `blur`)로 생성됩니다.
 - Outpainting 판단은 내용 종류(예: 꽃 유무) 자체를 금지하지 않고, 경계 위화감 + 생성영역 전체 자연스러움 기준으로 수행됩니다.
+- `OUTPAINT_FORCE_ONLY=true`이면 미러/안전배경 폴백 없이 생성형 outpaint만 사용합니다(실패 시 Job 실패).
 
 ## 7. LastClipJob 실행
 
@@ -349,6 +352,8 @@ curl -X POST http://localhost:8000/api/v1/projects/<project_id>/cancel
 - `POST /api/v1/jobs/canvas/upload`: 이미지 업로드 + Canvas Job 등록
   - form 필드 `fast_mode`(선택, 기본 `false`)
   - form 필드 `animal_detection`(선택, 기본 `true`)
+  - form 필드 `outpaint_prompt`(선택)
+  - form 필드 `outpaint_negative_prompt`(선택)
 - `POST /api/v1/jobs/transition/upload`: 이미지 2장 업로드 + Transition Job 등록
 - `POST /api/v1/jobs/last-clip/upload`: 이미지 업로드 + LastClip Job 등록
 - `POST /api/v1/jobs/pipeline/upload`: 이미지들 업로드 + Pipeline Job 등록

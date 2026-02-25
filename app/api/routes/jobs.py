@@ -249,6 +249,8 @@ def enqueue_canvas_job(
             output_path,
             payload.fast_mode,
             payload.animal_detection,
+            payload.outpaint_prompt,
+            payload.outpaint_negative_prompt,
         )
     except Exception as exc:  # noqa: BLE001 - broker error path
         crud.set_job_status(db, job.id, JobStatus.FAILED, error_message=str(exc))
@@ -749,6 +751,14 @@ def canvas_upload_ui() -> HTMLResponse:
           </select>
         </div>
         <div class="row full">
+          <label for="outpaintPrompt">Outpainting 프롬프트 (선택)</label>
+          <textarea id="outpaintPrompt" placeholder="natural grassy field continuation, soft daylight, seamless background"></textarea>
+        </div>
+        <div class="row full">
+          <label for="outpaintNegativePrompt">Outpainting 네거티브 프롬프트 (선택)</label>
+          <textarea id="outpaintNegativePrompt" placeholder="extra animal, duplicate pet, harsh border"></textarea>
+        </div>
+        <div class="row full">
           <label for="outputName">출력 파일명 (선택)</label>
           <input id="outputName" type="text" placeholder="canvas_output.jpg" />
           <div class="muted">확장자가 없거나 이미지 확장자가 아니면 `.jpg`로 저장됩니다.</div>
@@ -764,11 +774,15 @@ def canvas_upload_ui() -> HTMLResponse:
       const outputName = document.getElementById("outputName").value;
       const fastMode = document.getElementById("fastMode").value === "true";
       const animalDetection = document.getElementById("animalDetection").value === "true";
+      const outpaintPrompt = document.getElementById("outpaintPrompt").value;
+      const outpaintNegativePrompt = document.getElementById("outpaintNegativePrompt").value;
       const form = new FormData();
       form.append("image", image);
       if (outputName) form.append("output_name", outputName);
       form.append("fast_mode", String(fastMode));
       form.append("animal_detection", String(animalDetection));
+      if (outpaintPrompt) form.append("outpaint_prompt", outpaintPrompt);
+      if (outpaintNegativePrompt) form.append("outpaint_negative_prompt", outpaintNegativePrompt);
 
       btn.disabled = true;
       setState("요청 전송 중...");
@@ -802,6 +816,8 @@ def enqueue_canvas_upload_job(
     output_name: str | None = Form(default=None),
     fast_mode: bool = Form(default=False),
     animal_detection: bool = Form(default=True),
+    outpaint_prompt: str | None = Form(default=None),
+    outpaint_negative_prompt: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> CanvasUploadEnqueueResponse:
     ext = Path(image.filename or "").suffix.lower()
@@ -836,6 +852,8 @@ def enqueue_canvas_upload_job(
             output_path,
             fast_mode,
             animal_detection,
+            outpaint_prompt.strip() if outpaint_prompt and outpaint_prompt.strip() else None,
+            outpaint_negative_prompt.strip() if outpaint_negative_prompt and outpaint_negative_prompt.strip() else None,
         )
     except Exception as exc:  # noqa: BLE001 - broker error path
         crud.set_job_status(db, job.id, JobStatus.FAILED, error_message=str(exc))
@@ -849,6 +867,12 @@ def enqueue_canvas_upload_job(
         output_path=output_path,
         fast_mode=fast_mode,
         animal_detection=animal_detection,
+        outpaint_prompt=outpaint_prompt.strip() if outpaint_prompt and outpaint_prompt.strip() else None,
+        outpaint_negative_prompt=(
+            outpaint_negative_prompt.strip()
+            if outpaint_negative_prompt and outpaint_negative_prompt.strip()
+            else None
+        ),
     )
 
 

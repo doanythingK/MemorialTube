@@ -220,10 +220,13 @@ def build_canvas_image(
     animal_detector: AnimalDetector | None = None,
     fast_mode: bool = False,
     enable_animal_detection: bool = True,
+    outpaint_prompt: str | None = None,
+    outpaint_negative_prompt: str | None = None,
 ) -> CanvasBuildResult:
     target_w = settings.target_width
     target_h = settings.target_height
     strict = settings.strict_safety_checks
+    force_only = bool(settings.outpaint_force_only)
 
     source_bgr = _load_bgr(input_path)
     resized_bgr, placement = _resize_with_aspect(source_bgr, target_w, target_h)
@@ -237,8 +240,20 @@ def build_canvas_image(
     )
     safe_canvas = _compose_center(safe_background, resized_bgr, placement)
 
-    # Outpaint is only attempted on left/right gaps and only when content width is enough.
-    if placement.width >= target_w or placement.width < settings.outpaint_min_width_for_generation:
+    # No generation zone: already fills full width.
+    if placement.width >= target_w:
+        return CanvasBuildResult(
+            image=safe_canvas,
+            used_outpaint=False,
+            adapter_name="none",
+            fallback_applied=True,
+            fallback_reason="outpaint skipped by width policy",
+            safety_passed=True,
+            safety_message="safe padding path",
+        )
+
+    # Under width policy can skip outpaint unless force-only mode is enabled.
+    if placement.width < settings.outpaint_min_width_for_generation and not force_only:
         return CanvasBuildResult(
             image=safe_canvas,
             used_outpaint=False,
@@ -266,6 +281,8 @@ def build_canvas_image(
                 generation_mask,
                 num_inference_steps=outpaint_steps,
                 fast_mode=fast_mode,
+                prompt=outpaint_prompt,
+                negative_prompt=outpaint_negative_prompt,
             )
         except Exception as exc:  # noqa: BLE001 - model adapter error path
             last_reason = f"outpaint execution failed: {exc}"
@@ -296,6 +313,16 @@ def build_canvas_image(
             last_reason = f"protected region safety check error: {exc}"
             continue
         if not protected_check.passed:
+            if force_only:
+                return CanvasBuildResult(
+                    image=candidate,
+                    used_outpaint=True,
+                    adapter_name=adapter_name,
+                    fallback_applied=False,
+                    fallback_reason=protected_check.reason,
+                    safety_passed=False,
+                    safety_message="force outpaint accepted (protected-region check failed)",
+                )
             last_reason = protected_check.reason or "protected region safety check failed"
             continue
 
@@ -311,6 +338,16 @@ def build_canvas_image(
                     strict_mode=strict,
                 )
                 if not animal_check.passed:
+                    if force_only:
+                        return CanvasBuildResult(
+                            image=candidate,
+                            used_outpaint=True,
+                            adapter_name=adapter_name,
+                            fallback_applied=False,
+                            fallback_reason=animal_check.reason,
+                            safety_passed=False,
+                            safety_message="force outpaint accepted (animal check failed)",
+                        )
                     last_reason = animal_check.reason or "new-animal safety check failed"
                     continue
 
@@ -320,6 +357,16 @@ def build_canvas_image(
                 generation_mask,
             )
             if not boundary_check.passed:
+                if force_only:
+                    return CanvasBuildResult(
+                        image=candidate,
+                        used_outpaint=True,
+                        adapter_name=adapter_name,
+                        fallback_applied=False,
+                        fallback_reason=boundary_check.reason,
+                        safety_passed=False,
+                        safety_message="force outpaint accepted (boundary check failed)",
+                    )
                 last_reason = boundary_check.reason or "generation boundary safety check failed"
                 continue
 
@@ -329,10 +376,24 @@ def build_canvas_image(
                 generation_mask,
             )
             if not naturalness_check.passed:
+                if force_only:
+                    return CanvasBuildResult(
+                        image=candidate,
+                        used_outpaint=True,
+                        adapter_name=adapter_name,
+                        fallback_applied=False,
+                        fallback_reason=naturalness_check.reason,
+                        safety_passed=False,
+                        safety_message="force outpaint accepted (naturalness check failed)",
+                    )
                 last_reason = naturalness_check.reason or "generated region naturalness check failed"
                 continue
 
         if isinstance(adapter, MirrorOutpaintAdapter):
+            if force_only:
+                raise RuntimeError(
+                    "OUTPAINT_FORCE_ONLY=true but MirrorOutpaintAdapter was selected"
+                )
             return CanvasBuildResult(
                 image=safe_canvas,
                 used_outpaint=False,
@@ -356,6 +417,9 @@ def build_canvas_image(
             safety_message="outpaint accepted",
         )
 
+    if force_only:
+        raise RuntimeError(f"force outpaint failed: {last_reason}")
+
     return CanvasBuildResult(
         image=safe_canvas,
         used_outpaint=True,
@@ -373,11 +437,15 @@ def run_canvas_job(
     *,
     fast_mode: bool = False,
     enable_animal_detection: bool = True,
+    outpaint_prompt: str | None = None,
+    outpaint_negative_prompt: str | None = None,
 ) -> CanvasBuildResult:
     result = build_canvas_image(
         input_path,
         fast_mode=fast_mode,
         enable_animal_detection=enable_animal_detection,
+        outpaint_prompt=outpaint_prompt,
+        outpaint_negative_prompt=outpaint_negative_prompt,
     )
     _save_bgr(output_path, result.image)
     return result

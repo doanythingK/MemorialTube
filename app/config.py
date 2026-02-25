@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     canvas_edge_blend_px: int = 24
 
     outpaint_provider: str = "auto"  # auto|diffusers|mirror
+    outpaint_force_only: bool = False
     outpaint_model_id: str = "stabilityai/stable-diffusion-2-inpainting"
     outpaint_device: str = "auto"  # auto|cpu|cuda
     outpaint_prompt: str = (
