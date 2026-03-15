@@ -1,0 +1,45 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: memorialtube-java
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+  datasource:
+    url: jdbc:h2:file:./data/java/memorialtube;AUTO_SERVER=TRUE
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  servlet:
+    multipart:
+      max-file-size: 64MB
+      max-request-size: 256MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+memorialtube:
+  ffmpeg-path: ${MEMORIALTUBE_FFMPEG_PATH:ffmpeg}
+  target-width: ${MEMORIALTUBE_TARGET_WIDTH:1600}
+  target-height: ${MEMORIALTUBE_TARGET_HEIGHT:900}
+  target-fps: ${MEMORIALTUBE_TARGET_FPS:24}
+  output-video-codec: ${MEMORIALTUBE_OUTPUT_VIDEO_CODEC:libx264}
+  output-pixel-format: ${MEMORIALTUBE_OUTPUT_PIXEL_FORMAT:yuv420p}
+  canvas-background-blur-radius: ${MEMORIALTUBE_CANVAS_BLUR_RADIUS:22}
+  transition-motion-scale: ${MEMORIALTUBE_TRANSITION_MOTION_SCALE:0.06}
+  transition-frame-progress-step: ${MEMORIALTUBE_TRANSITION_FRAME_PROGRESS_STEP:12}
+  storage-root: ${MEMORIALTUBE_STORAGE_ROOT:data/java/storage}
+  working-root: ${MEMORIALTUBE_WORKING_ROOT:data/java/work}
+  output-root: ${MEMORIALTUBE_OUTPUT_ROOT:data/java/output}
+  temp-root: ${MEMORIALTUBE_TEMP_ROOT:data/java/tmp}

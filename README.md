@@ -63,6 +63,38 @@ make ps
 curl http://localhost:8000/api/v1/health
 ```
 
+## 2.1 Docker 없이 로컬 실행
+
+Python 백엔드만 로컬 프로세스로 실행하려면:
+
+```bash
+./setup.sh --with-ai
+./scripts/start_backend.sh
+```
+
+Spring 기반 Java 구현을 별도 프로세스로 실행하려면:
+
+```bash
+cd spring-api
+gradle bootRun
+```
+
+또는:
+
+```bash
+./scripts/start_spring_api.sh
+```
+
+기본 포트:
+- Python API: `http://127.0.0.1:8000`
+- Spring API: `http://127.0.0.1:8080`
+
+Spring API는 Python을 호출하는 프록시가 아니라 별도 구현입니다.
+- Spring health: `GET http://127.0.0.1:8080/api/v1/health`
+- Java transition enqueue: `POST http://127.0.0.1:8080/api/v1/jobs/transition`
+- Java pipeline enqueue: `POST http://127.0.0.1:8080/api/v1/jobs/pipeline`
+- Java project run: `POST http://127.0.0.1:8080/api/v1/projects/{projectId}/run`
+
 ## 3. 생성형 Outpainting/동물감지 활성화
 
 기본 의존성(`requirements.txt`)만 설치하면 서비스는 동작하지만, 생성형 모델은 비활성일 수 있습니다.  
