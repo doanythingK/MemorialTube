@@ -37,6 +37,10 @@ class GenerativeTransitionAdapter(Protocol):
         base_frame_bgr: np.ndarray,
         prompt: str,
         negative_prompt: str | None,
+        *,
+        num_inference_steps: int | None = None,
+        guidance_scale: float | None = None,
+        generation_size: tuple[int, int] | None = None,
     ) -> np.ndarray:
         ...
 
@@ -51,8 +55,12 @@ class NullGenerativeTransitionAdapter:
         base_frame_bgr: np.ndarray,
         prompt: str,
         negative_prompt: str | None,
+        *,
+        num_inference_steps: int | None = None,
+        guidance_scale: float | None = None,
+        generation_size: tuple[int, int] | None = None,
     ) -> np.ndarray:
-        _ = prompt, negative_prompt
+        _ = prompt, negative_prompt, num_inference_steps, guidance_scale, generation_size
         return base_frame_bgr
 
 
@@ -86,9 +94,17 @@ class DiffusersImage2ImageTransitionAdapter:
         base_frame_bgr: np.ndarray,
         prompt: str,
         negative_prompt: str | None,
+        *,
+        num_inference_steps: int | None = None,
+        guidance_scale: float | None = None,
+        generation_size: tuple[int, int] | None = None,
     ) -> np.ndarray:
-        gen_w = max(64, int(settings.transition_generation_width))
-        gen_h = max(64, int(settings.transition_generation_height))
+        if generation_size is None:
+            gen_w = max(64, int(settings.transition_generation_width))
+            gen_h = max(64, int(settings.transition_generation_height))
+        else:
+            gen_w = max(64, int(generation_size[0]))
+            gen_h = max(64, int(generation_size[1]))
 
         base_rgb = base_frame_bgr[:, :, ::-1]
         base_pil = Image.fromarray(base_rgb, mode="RGB").resize(
@@ -96,12 +112,15 @@ class DiffusersImage2ImageTransitionAdapter:
             Image.Resampling.LANCZOS,
         )
 
+        step_count = int(num_inference_steps) if num_inference_steps is not None else settings.transition_num_inference_steps
+        scale = float(guidance_scale) if guidance_scale is not None else settings.transition_guidance_scale
+
         kwargs: dict[str, object] = {
             "prompt": prompt,
             "image": base_pil,
             "strength": settings.transition_strength,
-            "guidance_scale": settings.transition_guidance_scale,
-            "num_inference_steps": settings.transition_num_inference_steps,
+            "guidance_scale": scale,
+            "num_inference_steps": max(1, step_count),
         }
         if negative_prompt:
             kwargs["negative_prompt"] = negative_prompt
@@ -130,6 +149,16 @@ def create_transition_adapter() -> GenerativeTransitionAdapter:
                 raise
 
     return NullGenerativeTransitionAdapter()
+
+
+@lru_cache(maxsize=1)
+def _cuda_available() -> bool:
+    try:
+        import torch  # noqa: PLC0415 - optional dependency
+
+        return bool(torch.cuda.is_available())
+    except Exception:  # noqa: BLE001 - optional dependency/runtime variance
+        return False
 
 
 def _load_and_normalize(path: str) -> np.ndarray:
@@ -189,6 +218,7 @@ def _validate_transition_safety(
     frame_a: np.ndarray,
     frame_b: np.ndarray,
     detector: AnimalDetector,
+    sample_step: int,
 ) -> tuple[bool, str | None]:
     if not frames:
         return False, "frames are empty"
@@ -213,7 +243,7 @@ def _validate_transition_safety(
     baseline = max(base_a, base_b)
     allowed = max(0, int(settings.transition_allowed_extra_animals))
 
-    for idx in _sample_indices(len(frames), settings.transition_safety_sample_step):
+    for idx in _sample_indices(len(frames), sample_step):
         count, err = _animal_count(detector, frames[idx], strict)
         if err:
             return False, err
@@ -267,13 +297,19 @@ def _build_classic_transition_clip(
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    xfade_duration = 1.0
-    xfade_offset = max(0.0, float(duration_seconds) - xfade_duration)
+    # Keep fallback transition cinematic enough when generative path is unavailable.
+    xfade_duration = min(1.8, max(0.8, float(duration_seconds) * 0.25))
+    xfade_offset = max(0.4, float(duration_seconds) * 0.45)
+    if xfade_offset + xfade_duration >= float(duration_seconds):
+        xfade_offset = max(0.0, float(duration_seconds) - xfade_duration - 0.1)
+
     filter_complex = (
         f"[0:v]scale={settings.target_width}:{settings.target_height}:force_original_aspect_ratio=decrease,"
-        f"pad={settings.target_width}:{settings.target_height}:(ow-iw)/2:(oh-ih)/2,format={settings.output_pixel_format},fps={settings.target_fps}[v0];"
+        f"pad={settings.target_width}:{settings.target_height}:(ow-iw)/2:(oh-ih)/2,"
+        f"setsar=1,format={settings.output_pixel_format},fps={settings.target_fps}[v0];"
         f"[1:v]scale={settings.target_width}:{settings.target_height}:force_original_aspect_ratio=decrease,"
-        f"pad={settings.target_width}:{settings.target_height}:(ow-iw)/2:(oh-ih)/2,format={settings.output_pixel_format},fps={settings.target_fps}[v1];"
+        f"pad={settings.target_width}:{settings.target_height}:(ow-iw)/2:(oh-ih)/2,"
+        f"setsar=1,format={settings.output_pixel_format},fps={settings.target_fps}[v1];"
         f"[v0][v1]xfade=transition=fade:duration={xfade_duration}:offset={xfade_offset},"
         f"format={settings.output_pixel_format}"
     )
@@ -331,6 +367,20 @@ def build_transition_clip(
     total_frames = max(2, int(duration_seconds * settings.target_fps))
     adapter = create_transition_adapter()
     detector = create_default_detector()
+    gen_step = max(1, int(settings.transition_generation_step))
+    infer_steps = max(1, int(settings.transition_num_inference_steps))
+    gen_w = max(64, int(settings.transition_generation_width))
+    gen_h = max(64, int(settings.transition_generation_height))
+    safety_step = max(1, int(settings.transition_safety_sample_step))
+
+    # CPU-only runtime is much slower for diffusion generation.
+    # Use bounded generation settings so local smoke tests finish in practical time.
+    if settings.transition_cpu_fast_mode and not _cuda_available():
+        gen_step = max(gen_step, int(settings.transition_cpu_generation_step))
+        infer_steps = min(infer_steps, max(1, int(settings.transition_cpu_num_inference_steps)))
+        gen_w = min(gen_w, max(64, int(settings.transition_cpu_generation_width)))
+        gen_h = min(gen_h, max(64, int(settings.transition_cpu_generation_height)))
+        safety_step = max(safety_step, int(settings.transition_cpu_safety_sample_step))
 
     # If explicit classic mode, bypass generative attempts.
     if settings.transition_provider.lower().strip() == "classic":
@@ -359,7 +409,6 @@ def build_transition_clip(
 
         try:
             frames: list[np.ndarray] = []
-            gen_step = max(1, int(settings.transition_generation_step))
             for idx in range(total_frames):
                 alpha = idx / (total_frames - 1)
                 base = _blend(frame_a, frame_b, alpha)
@@ -371,14 +420,27 @@ def build_transition_clip(
                     # Keep runtime bounded: use blended frame between generated keyframes.
                     frame = base
                 else:
-                    frame = adapter.generate_frame(base, prompt=prompt, negative_prompt=negative_prompt)
+                    frame = adapter.generate_frame(
+                        base,
+                        prompt=prompt,
+                        negative_prompt=negative_prompt,
+                        num_inference_steps=infer_steps,
+                        guidance_scale=settings.transition_guidance_scale,
+                        generation_size=(gen_w, gen_h),
+                    )
                 frames.append(frame)
 
             # Hard enforce first/last exactness.
             frames[0] = frame_a.copy()
             frames[-1] = frame_b.copy()
 
-            safety_ok, safety_reason = _validate_transition_safety(frames, frame_a, frame_b, detector)
+            safety_ok, safety_reason = _validate_transition_safety(
+                frames,
+                frame_a,
+                frame_b,
+                detector,
+                sample_step=safety_step,
+            )
             if not safety_ok:
                 last_reason = safety_reason or "transition safety check failed"
                 continue
@@ -395,6 +457,9 @@ def build_transition_clip(
         except Exception as exc:  # noqa: BLE001 - generation/runtime failure
             last_reason = str(exc)
             continue
+
+    if settings.transition_require_generative:
+        raise RuntimeError(f"generative transition failed: {last_reason}")
 
     built = _build_classic_transition_clip(
         image_a_path=image_a_path,

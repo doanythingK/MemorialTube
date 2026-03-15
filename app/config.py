@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     transition_max_attempts: int = 2
 
     outpaint_provider: str = "auto"  # auto|diffusers|mirror
-    outpaint_model_id: str = "stabilityai/stable-diffusion-2-inpainting"
+    outpaint_model_id: str = "runwayml/stable-diffusion-inpainting"
     outpaint_device: str = "auto"  # auto|cpu|cuda
     outpaint_prompt: str = (
         "clean memorial photo background extension, natural, soft light, seamless, no extra animals"
@@ -42,14 +42,24 @@ class Settings(BaseSettings):
     transition_provider: str = "auto"  # auto|diffusers|classic
     transition_model_id: str = "runwayml/stable-diffusion-v1-5"
     transition_device: str = "auto"  # auto|cpu|cuda
+    transition_require_generative: bool = False
     transition_guidance_scale: float = 7.0
     transition_num_inference_steps: int = 24
     transition_strength: float = 0.35
     transition_generation_width: int = 800
     transition_generation_height: int = 450
-    transition_generation_step: int = 8
+    transition_generation_step: int = 2
     transition_allowed_extra_animals: int = 0
     transition_safety_sample_step: int = 8
+    transition_cpu_fast_mode: bool = True
+    transition_cpu_generation_step: int = 48
+    transition_cpu_num_inference_steps: int = 4
+    transition_cpu_generation_width: int = 384
+    transition_cpu_generation_height: int = 216
+    transition_cpu_safety_sample_step: int = 48
+
+    render_apply_tone_filter: bool = True
+    render_tone_filter: str = "eq=contrast=1.04:saturation=0.92:gamma=1.03"
 
     storage_root: str = "data/storage"
 

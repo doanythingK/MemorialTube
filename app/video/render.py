@@ -27,6 +27,8 @@ def build_final_render(
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    tone_filter = settings.render_tone_filter.strip() if settings.render_apply_tone_filter else ""
+
     with tempfile.TemporaryDirectory(prefix="render_concat_") as tmp_dir:
         list_file = Path(tmp_dir) / "clips.txt"
         with list_file.open("w", encoding="utf-8") as fp:
@@ -54,19 +56,25 @@ def build_final_render(
                 "0:v:0",
                 "-map",
                 "1:a:0",
-                "-filter:a",
-                f"volume={bgm_volume}",
-                "-shortest",
-                "-r",
-                str(settings.target_fps),
-                "-pix_fmt",
-                settings.output_pixel_format,
-                "-c:v",
-                settings.output_video_codec,
-                "-c:a",
-                "aac",
-                str(out),
             ]
+            if tone_filter:
+                cmd.extend(["-filter:v", tone_filter])
+            cmd.extend(
+                [
+                    "-filter:a",
+                    f"volume={bgm_volume}",
+                    "-shortest",
+                    "-r",
+                    str(settings.target_fps),
+                    "-pix_fmt",
+                    settings.output_pixel_format,
+                    "-c:v",
+                    settings.output_video_codec,
+                    "-c:a",
+                    "aac",
+                    str(out),
+                ]
+            )
         else:
             cmd = [
                 settings.ffmpeg_path,
@@ -80,14 +88,20 @@ def build_final_render(
                 "-map",
                 "0:v:0",
                 "-an",
-                "-r",
-                str(settings.target_fps),
-                "-pix_fmt",
-                settings.output_pixel_format,
-                "-c:v",
-                settings.output_video_codec,
-                str(out),
             ]
+            if tone_filter:
+                cmd.extend(["-filter:v", tone_filter])
+            cmd.extend(
+                [
+                    "-r",
+                    str(settings.target_fps),
+                    "-pix_fmt",
+                    settings.output_pixel_format,
+                    "-c:v",
+                    settings.output_video_codec,
+                    str(out),
+                ]
+            )
 
         process = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if process.returncode != 0:

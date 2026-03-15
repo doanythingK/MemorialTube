@@ -126,6 +126,19 @@ def build_canvas_image(
 
     adapter = outpaint_adapter or create_default_outpaint_adapter()
     detector = animal_detector or create_default_detector()
+
+    # Mirror adapter is a deterministic placeholder and can create visible side stretching.
+    # Prefer safe background path unless a real generative adapter is available.
+    if isinstance(adapter, MirrorOutpaintAdapter):
+        return CanvasBuildResult(
+            image=safe_canvas,
+            used_outpaint=False,
+            fallback_applied=True,
+            fallback_reason="generative outpaint unavailable, safe background path",
+            safety_passed=True,
+            safety_message="safe background path",
+        )
+
     last_reason = "unknown outpaint failure"
     attempts = max(1, settings.outpaint_max_attempts)
 
@@ -135,6 +148,10 @@ def build_canvas_image(
         except Exception as exc:  # noqa: BLE001 - model adapter error path
             last_reason = f"outpaint execution failed: {exc}"
             continue
+
+        # Hard-protect subject region to prevent diffusion spill into the pet area.
+        candidate = candidate.copy()
+        candidate[protected_mask > 0] = base_for_generation[protected_mask > 0]
 
         protected_check = check_protected_region_unchanged(
             base_for_generation,

@@ -94,6 +94,7 @@ class DiffusersOutpaintAdapter:
         if generation_mask.shape != base_image_bgr.shape[:2]:
             raise ValueError("generation_mask shape mismatch")
 
+        h, w = base_image_bgr.shape[:2]
         image = Image.fromarray(base_image_bgr[:, :, ::-1], mode="RGB")
         mask = Image.fromarray(generation_mask, mode="L")
 
@@ -111,6 +112,8 @@ class DiffusersOutpaintAdapter:
             )
 
         result = self._pipe(**kwargs).images[0]
+        if result.size != (w, h):
+            result = result.resize((w, h), Image.Resampling.LANCZOS)
         out_rgb = np.array(result, dtype=np.uint8)
         return out_rgb[:, :, ::-1]  # RGB -> BGR
 
