@@ -740,7 +740,7 @@ def canvas_upload_ui() -> HTMLResponse:
           <label for="fastMode">빠른 모드</label>
           <select id="fastMode">
             <option value="false" selected>기본(품질 우선)</option>
-            <option value="true">빠른 모드(steps=12)</option>
+            <option value="true">빠른 모드(steps=20)</option>
           </select>
         </div>
         <div class="row">

@@ -272,81 +272,62 @@ def build_canvas_image(
     detector: AnimalDetector | None = animal_detector
     last_reason = "unknown outpaint failure"
     attempts = 1 if fast_mode else max(1, settings.outpaint_max_attempts)
-    outpaint_steps = 12 if fast_mode else settings.outpaint_num_inference_steps
-    if isinstance(adapter, MirrorOutpaintAdapter):
-        if force_only:
-            raise RuntimeError("OUTPAINT_FORCE_ONLY=true but MirrorOutpaintAdapter was selected")
-        return CanvasBuildResult(
-            image=safe_canvas,
-            used_outpaint=False,
-            adapter_name=adapter_name,
-            fallback_applied=True,
-            fallback_reason=(
-                "mirror adapter selected; forced safe background fallback "
-                "(generative outpaint unavailable)"
-            ),
-            safety_passed=True,
-            safety_message="safe fallback applied (mirror output blocked)",
-        )
-
-    candidate_count = max(
-        1,
-        int(
-            settings.outpaint_fast_candidate_count
-            if fast_mode
-            else settings.outpaint_candidate_count
-        ),
-    )
-
-    best_pass_image: np.ndarray | None = None
-    best_pass_score = float("inf")
-    best_any_image: np.ndarray | None = None
-    best_any_score = float("inf")
-    best_any_reason: str | None = None
-    best_any_safety = False
+    outpaint_steps = 20 if fast_mode else settings.outpaint_num_inference_steps
 
     for _attempt in range(1, attempts + 1):
-        for _candidate_idx in range(candidate_count):
-            try:
-                candidate = adapter.outpaint(
-                    base_for_generation,
-                    generation_mask,
-                    num_inference_steps=outpaint_steps,
-                    fast_mode=fast_mode,
-                    prompt=outpaint_prompt,
-                    negative_prompt=outpaint_negative_prompt,
-                )
-            except Exception as exc:  # noqa: BLE001 - model adapter error path
-                last_reason = f"outpaint execution failed: {exc}"
-                continue
+        try:
+            candidate = adapter.outpaint(
+                base_for_generation,
+                generation_mask,
+                num_inference_steps=outpaint_steps,
+                fast_mode=fast_mode,
+                prompt=outpaint_prompt,
+                negative_prompt=outpaint_negative_prompt,
+            )
+        except Exception as exc:  # noqa: BLE001 - model adapter error path
+            last_reason = f"outpaint execution failed: {exc}"
+            continue
 
-            candidate = _preserve_protected_region(
+        # Preserve the original subject region exactly before safety checks.
+        candidate = _preserve_protected_region(
+            base_for_generation,
+            candidate,
+            protected_mask,
+        )
+
+        if fast_mode:
+            candidate = _harmonize_generated_region(
+                candidate,
+                safe_canvas,
+                generation_mask,
+                placement,
+            )
+
+        try:
+            protected_check = check_protected_region_unchanged(
                 base_for_generation,
                 candidate,
                 protected_mask,
             )
-
-            if fast_mode:
-                candidate = _harmonize_generated_region(
-                    candidate,
-                    safe_canvas,
-                    generation_mask,
-                    placement,
+        except ValueError as exc:
+            last_reason = f"protected region safety check error: {exc}"
+            continue
+        if not protected_check.passed:
+            if force_only:
+                return CanvasBuildResult(
+                    image=candidate,
+                    used_outpaint=True,
+                    adapter_name=adapter_name,
+                    fallback_applied=False,
+                    fallback_reason=protected_check.reason,
+                    safety_passed=False,
+                    safety_message="force outpaint accepted (protected-region check failed)",
                 )
+            last_reason = protected_check.reason or "protected region safety check failed"
+            continue
 
-            try:
-                protected_check = check_protected_region_unchanged(
-                    base_for_generation,
-                    candidate,
-                    protected_mask,
-                )
-            except ValueError as exc:
-                last_reason = f"protected region safety check error: {exc}"
-                continue
-
-            animal_check_passed = True
-            animal_severity = 0.0
-            animal_reason: str | None = None
+        # Deterministic placeholder adapter does not synthesize new entities.
+        if not isinstance(adapter, MirrorOutpaintAdapter):
             if enable_animal_detection:
                 if detector is None:
                     detector = create_default_detector()
@@ -356,76 +337,84 @@ def build_canvas_image(
                     detector,
                     strict_mode=strict,
                 )
-                animal_check_passed = animal_check.passed
-                animal_severity = float(animal_check.severity)
-                animal_reason = animal_check.reason
+                if not animal_check.passed:
+                    if force_only:
+                        return CanvasBuildResult(
+                            image=candidate,
+                            used_outpaint=True,
+                            adapter_name=adapter_name,
+                            fallback_applied=False,
+                            fallback_reason=animal_check.reason,
+                            safety_passed=False,
+                            safety_message="force outpaint accepted (animal check failed)",
+                        )
+                    last_reason = animal_check.reason or "new-animal safety check failed"
+                    continue
 
             boundary_check = check_generation_boundary_continuity(
                 candidate,
                 protected_mask,
                 generation_mask,
             )
+            if not boundary_check.passed:
+                if force_only:
+                    return CanvasBuildResult(
+                        image=candidate,
+                        used_outpaint=True,
+                        adapter_name=adapter_name,
+                        fallback_applied=False,
+                        fallback_reason=boundary_check.reason,
+                        safety_passed=False,
+                        safety_message="force outpaint accepted (boundary check failed)",
+                    )
+                last_reason = boundary_check.reason or "generation boundary safety check failed"
+                continue
+
             naturalness_check = check_generated_region_naturalness(
                 candidate,
                 protected_mask,
                 generation_mask,
             )
+            if not naturalness_check.passed:
+                if force_only:
+                    return CanvasBuildResult(
+                        image=candidate,
+                        used_outpaint=True,
+                        adapter_name=adapter_name,
+                        fallback_applied=False,
+                        fallback_reason=naturalness_check.reason,
+                        safety_passed=False,
+                        safety_message="force outpaint accepted (naturalness check failed)",
+                    )
+                last_reason = naturalness_check.reason or "generated region naturalness check failed"
+                continue
 
-            pass_all = (
-                protected_check.passed
-                and animal_check_passed
-                and boundary_check.passed
-                and naturalness_check.passed
+        if isinstance(adapter, MirrorOutpaintAdapter):
+            if force_only:
+                raise RuntimeError(
+                    "OUTPAINT_FORCE_ONLY=true but MirrorOutpaintAdapter was selected"
+                )
+            return CanvasBuildResult(
+                image=safe_canvas,
+                used_outpaint=False,
+                adapter_name=adapter_name,
+                fallback_applied=True,
+                fallback_reason=(
+                    "mirror adapter selected; forced safe background fallback "
+                    "(generative outpaint unavailable)"
+                ),
+                safety_passed=True,
+                safety_message="safe fallback applied (mirror output blocked)",
             )
-            reason = (
-                protected_check.reason
-                or animal_reason
-                or boundary_check.reason
-                or naturalness_check.reason
-            )
 
-            score = float(
-                protected_check.severity * 4.0
-                + animal_severity * 3.0
-                + boundary_check.severity * 2.0
-                + naturalness_check.severity * 2.0
-            )
-            if pass_all:
-                score -= 100.0
-
-            if score < best_any_score:
-                best_any_score = score
-                best_any_image = candidate
-                best_any_reason = reason
-                best_any_safety = pass_all
-
-            if pass_all and score < best_pass_score:
-                best_pass_score = score
-                best_pass_image = candidate
-
-            if not pass_all:
-                last_reason = reason or "safety checks failed"
-
-    if best_pass_image is not None:
         return CanvasBuildResult(
-            image=best_pass_image,
+            image=candidate,
             used_outpaint=True,
             adapter_name=adapter_name,
             fallback_applied=False,
             fallback_reason=None,
             safety_passed=True,
-            safety_message="outpaint accepted (best-of candidates)",
-        )
-
-    if force_only and best_any_image is not None:
-        return CanvasBuildResult(
-            image=best_any_image,
-            used_outpaint=True,
-            adapter_name=adapter_name,
-            fallback_applied=False,
-            fallback_reason=best_any_reason,
-            safety_passed=best_any_safety,
-            safety_message="force outpaint accepted (best-of candidates)",
+            safety_message="outpaint accepted",
         )
 
     if force_only:

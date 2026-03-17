@@ -91,7 +91,7 @@ pkill -f "uvicorn app.main:app" >/dev/null 2>&1 || true
 pkill -f "celery -A app.celery_app worker" >/dev/null 2>&1 || true
 sleep 1
 
-nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 >/tmp/memorialtube_api.log 2>&1 &
+nohup uvicorn app.main:app --host 0.0.0.0 --port 18765 >/tmp/memorialtube_api.log 2>&1 &
 API_PID=$!
 
 nohup celery -A app.celery_app worker -l info --pool "${CELERY_WORKER_POOL}" --concurrency "${CELERY_WORKER_CONCURRENCY}" >/tmp/memorialtube_worker.log 2>&1 &
@@ -104,8 +104,8 @@ echo "[ok] API log: /tmp/memorialtube_api.log"
 echo "[ok] Worker log: /tmp/memorialtube_worker.log"
 
 for _ in $(seq 1 "${HEALTH_CHECK_RETRIES}"); do
-  if curl --max-time 2 -fsS http://127.0.0.1:8000/api/v1/health >/dev/null 2>&1; then
-    echo "[ok] Health check passed: http://127.0.0.1:8000/api/v1/health"
+  if curl --max-time 2 -fsS http://127.0.0.1:18765/api/v1/health >/dev/null 2>&1; then
+    echo "[ok] Health check passed: http://127.0.0.1:18765/api/v1/health"
     exit 0
   fi
   if ! kill -0 "${API_PID}" >/dev/null 2>&1; then

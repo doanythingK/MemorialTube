@@ -20,4 +20,4 @@ RUN if [ "$INSTALL_AI" = "1" ]; then pip install -r /workspace/requirements-ai.t
 
 COPY . /workspace
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "18765"]

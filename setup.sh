@@ -149,4 +149,4 @@ fi
 log "ffmpeg detected at ${ffmpeg_path}"
 log "Setup completed successfully."
 log "Activate virtualenv: source ${VENV_DIR}/bin/activate"
-log "Run API: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+log "Run API: uvicorn app.main:app --host 0.0.0.0 --port 18765 --reload"

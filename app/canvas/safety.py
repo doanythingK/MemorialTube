@@ -5,14 +5,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from app.canvas.detector import AnimalDetector
-from app.config import settings
 
 
 @dataclass(slots=True)
 class SafetyCheckResult:
     passed: bool
     reason: str | None = None
-    severity: float = 0.0
 
 
 def _count_changed_pixels(
@@ -47,19 +45,9 @@ def check_protected_region_unchanged(
     candidate_image_bgr: np.ndarray,
     protected_mask: np.ndarray,
     *,
-    max_changed_ratio: float | None = None,
-    diff_threshold: int | None = None,
+    max_changed_ratio: float = 0.001,
+    diff_threshold: int = 8,
 ) -> SafetyCheckResult:
-    max_changed_ratio = (
-        float(max_changed_ratio)
-        if max_changed_ratio is not None
-        else float(settings.protected_max_changed_ratio)
-    )
-    diff_threshold = (
-        int(diff_threshold)
-        if diff_threshold is not None
-        else int(settings.protected_diff_threshold)
-    )
     changed, total = _count_changed_pixels(
         base_image_bgr,
         candidate_image_bgr,
@@ -71,16 +59,14 @@ def check_protected_region_unchanged(
 
     ratio = changed / total
     if ratio > max_changed_ratio:
-        severity = ratio / max(max_changed_ratio, 1e-8)
         return SafetyCheckResult(
             passed=False,
             reason=(
                 f"protected region changed too much: ratio={ratio:.6f}, "
                 f"threshold={max_changed_ratio:.6f}"
             ),
-            severity=float(severity),
         )
-    return SafetyCheckResult(passed=True, severity=float(ratio / max(max_changed_ratio, 1e-8)))
+    return SafetyCheckResult(passed=True)
 
 
 def check_no_new_animals_in_generated_region(
@@ -119,10 +105,9 @@ def check_no_new_animals_in_generated_region(
                     f"new animal detected in generated region: "
                     f"{det.label}({det.confidence:.2f})"
                 ),
-                severity=10.0,
             )
 
-    return SafetyCheckResult(passed=True, severity=0.0)
+    return SafetyCheckResult(passed=True)
 
 
 def check_generation_boundary_continuity(
@@ -130,26 +115,10 @@ def check_generation_boundary_continuity(
     protected_mask: np.ndarray,
     generation_mask: np.ndarray,
     *,
-    max_mean_diff: float | None = None,
-    max_p95_diff: float | None = None,
-    min_pair_count: int | None = None,
+    max_mean_diff: float = 34.0,
+    max_p95_diff: float = 86.0,
+    min_pair_count: int = 120,
 ) -> SafetyCheckResult:
-    max_mean_diff = (
-        float(max_mean_diff)
-        if max_mean_diff is not None
-        else float(settings.boundary_max_mean_diff)
-    )
-    max_p95_diff = (
-        float(max_p95_diff)
-        if max_p95_diff is not None
-        else float(settings.boundary_max_p95_diff)
-    )
-    min_pair_count = (
-        int(min_pair_count)
-        if min_pair_count is not None
-        else int(settings.boundary_min_pair_count)
-    )
-
     if protected_mask.shape != candidate_image_bgr.shape[:2]:
         return SafetyCheckResult(passed=False, reason="protected mask shape mismatch")
     if generation_mask.shape != candidate_image_bgr.shape[:2]:
@@ -157,12 +126,12 @@ def check_generation_boundary_continuity(
 
     h, w = candidate_image_bgr.shape[:2]
     if h == 0 or w < 2:
-        return SafetyCheckResult(passed=True, severity=0.0)
+        return SafetyCheckResult(passed=True)
 
     protected = protected_mask > 0
     gen = generation_mask > 0
     if not gen.any():
-        return SafetyCheckResult(passed=True, severity=0.0)
+        return SafetyCheckResult(passed=True)
 
     left_pairs = gen[:, :-1] & protected[:, 1:]
     right_pairs = protected[:, :-1] & gen[:, 1:]
@@ -176,19 +145,15 @@ def check_generation_boundary_continuity(
     if right_pairs.any():
         values.append(diff_max[right_pairs])
     if not values:
-        return SafetyCheckResult(passed=True, severity=0.0)
+        return SafetyCheckResult(passed=True)
 
     boundary_diff = np.concatenate(values)
     pair_count = int(boundary_diff.size)
     if pair_count < min_pair_count:
-        return SafetyCheckResult(passed=True, severity=0.0)
+        return SafetyCheckResult(passed=True)
 
     mean_diff = float(boundary_diff.mean())
     p95_diff = float(np.percentile(boundary_diff, 95.0))
-    severity = max(
-        mean_diff / max(max_mean_diff, 1e-4),
-        p95_diff / max(max_p95_diff, 1e-4),
-    )
 
     if mean_diff > max_mean_diff or p95_diff > max_p95_diff:
         return SafetyCheckResult(
@@ -198,10 +163,9 @@ def check_generation_boundary_continuity(
                 f"mean_diff={mean_diff:.4f}, p95_diff={p95_diff:.4f}, pairs={pair_count}, "
                 f"limit_mean={max_mean_diff:.4f}, limit_p95={max_p95_diff:.4f}"
             ),
-            severity=float(severity),
         )
 
-    return SafetyCheckResult(passed=True, severity=float(severity))
+    return SafetyCheckResult(passed=True)
 
 
 def _gray(image_bgr: np.ndarray) -> np.ndarray:
@@ -246,44 +210,13 @@ def check_generated_region_naturalness(
     protected_mask: np.ndarray,
     generation_mask: np.ndarray,
     *,
-    ref_band_width: int | None = None,
-    min_pixels_per_side: int | None = None,
-    max_mean_delta_norm: float | None = None,
-    max_std_delta_norm: float | None = None,
-    max_grad_ratio: float | None = None,
-    max_edge_density_ratio: float | None = None,
+    ref_band_width: int = 72,
+    min_pixels_per_side: int = 1800,
+    max_mean_delta_norm: float = 0.26,
+    max_std_delta_norm: float = 0.36,
+    max_grad_ratio: float = 3.0,
+    max_edge_density_ratio: float = 3.5,
 ) -> SafetyCheckResult:
-    ref_band_width = (
-        int(ref_band_width)
-        if ref_band_width is not None
-        else int(settings.natural_ref_band_width)
-    )
-    min_pixels_per_side = (
-        int(min_pixels_per_side)
-        if min_pixels_per_side is not None
-        else int(settings.natural_min_pixels_per_side)
-    )
-    max_mean_delta_norm = (
-        float(max_mean_delta_norm)
-        if max_mean_delta_norm is not None
-        else float(settings.natural_max_mean_delta_norm)
-    )
-    max_std_delta_norm = (
-        float(max_std_delta_norm)
-        if max_std_delta_norm is not None
-        else float(settings.natural_max_std_delta_norm)
-    )
-    max_grad_ratio = (
-        float(max_grad_ratio)
-        if max_grad_ratio is not None
-        else float(settings.natural_max_grad_ratio)
-    )
-    max_edge_density_ratio = (
-        float(max_edge_density_ratio)
-        if max_edge_density_ratio is not None
-        else float(settings.natural_max_edge_density_ratio)
-    )
-
     if protected_mask.shape != candidate_image_bgr.shape[:2]:
         return SafetyCheckResult(passed=False, reason="protected mask shape mismatch")
     if generation_mask.shape != candidate_image_bgr.shape[:2]:
@@ -291,12 +224,12 @@ def check_generated_region_naturalness(
 
     h, w = candidate_image_bgr.shape[:2]
     if h == 0 or w == 0:
-        return SafetyCheckResult(passed=True, severity=0.0)
+        return SafetyCheckResult(passed=True)
 
     protected = protected_mask > 0
     generation = generation_mask > 0
     if not generation.any() or not protected.any():
-        return SafetyCheckResult(passed=True, severity=0.0)
+        return SafetyCheckResult(passed=True)
 
     gray = _gray(candidate_image_bgr)
     grad = _grad_magnitude(gray)
@@ -310,7 +243,6 @@ def check_generated_region_naturalness(
     right_boundary = int(protected_cols.max()) + 1
 
     side_failures: list[str] = []
-    side_severities: list[float] = []
 
     # Left generated side vs adjacent protected band
     if left_boundary > 0:
@@ -339,14 +271,6 @@ def check_generated_region_naturalness(
                     or grad_ratio > max_grad_ratio
                     or edge_density_ratio > max_edge_density_ratio
                 ):
-                    side_severities.append(
-                        max(
-                            mean_delta_norm / max(max_mean_delta_norm, 1e-6),
-                            std_delta_norm / max(max_std_delta_norm, 1e-6),
-                            grad_ratio / max(max_grad_ratio, 1e-6),
-                            edge_density_ratio / max(max_edge_density_ratio, 1e-6),
-                        )
-                    )
                     side_failures.append(
                         "left("
                         f"mean={mean_delta_norm:.4f},std={std_delta_norm:.4f},"
@@ -380,14 +304,6 @@ def check_generated_region_naturalness(
                     or grad_ratio > max_grad_ratio
                     or edge_density_ratio > max_edge_density_ratio
                 ):
-                    side_severities.append(
-                        max(
-                            mean_delta_norm / max(max_mean_delta_norm, 1e-6),
-                            std_delta_norm / max(max_std_delta_norm, 1e-6),
-                            grad_ratio / max(max_grad_ratio, 1e-6),
-                            edge_density_ratio / max(max_edge_density_ratio, 1e-6),
-                        )
-                    )
                     side_failures.append(
                         "right("
                         f"mean={mean_delta_norm:.4f},std={std_delta_norm:.4f},"
@@ -398,7 +314,6 @@ def check_generated_region_naturalness(
         return SafetyCheckResult(
             passed=False,
             reason="generated region unnatural: " + ", ".join(side_failures),
-            severity=max(side_severities) if side_severities else 1.0,
         )
 
-    return SafetyCheckResult(passed=True, severity=0.0)
+    return SafetyCheckResult(passed=True)

@@ -60,7 +60,7 @@ make ps
 5. API 헬스체크
 
 ```bash
-curl http://localhost:8000/api/v1/health
+curl http://localhost:18765/api/v1/health
 ```
 
 ## 3. 생성형 Outpainting/동물감지 활성화
@@ -90,7 +90,7 @@ chmod +x scripts/fix_ai_env.sh
 1. 테스트 Job 생성
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/jobs/test \
+curl -X POST http://localhost:18765/api/v1/jobs/test \
   -H "Content-Type: application/json" \
   -d '{"job_type":"test_render"}'
 ```
@@ -98,7 +98,7 @@ curl -X POST http://localhost:8000/api/v1/jobs/test \
 2. Job 조회
 
 ```bash
-curl http://localhost:8000/api/v1/jobs/<job_id>
+curl http://localhost:18765/api/v1/jobs/<job_id>
 ```
 
 `succeeded` 상태가 되면 워커가 `ffmpeg -version` 명령을 정상 실행한 것입니다.
@@ -108,13 +108,13 @@ curl http://localhost:8000/api/v1/jobs/<job_id>
 1. 전환 Job 생성 (`duration_seconds`는 `6` 또는 `10`, `prompt` 필수)
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/jobs/transition \
+curl -X POST http://localhost:18765/api/v1/jobs/transition \
   -H "Content-Type: application/json" \
   -d '{"image_a_path":"data/input/pet1.jpg","image_b_path":"data/input/pet2.jpg","output_path":"data/output/transition_1.mp4","duration_seconds":6,"prompt":"gentle memorial cinematic transition, soft light","negative_prompt":"extra animal, distorted pet"}'
 ```
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/jobs/transition \
+curl -X POST http://localhost:18765/api/v1/jobs/transition \
   -H "Content-Type: application/json" \
   -d '{"image_a_path":"data/input/pet1.jpg","image_b_path":"data/input/pet2.jpg","output_path":"data/output/transition_1.mp4","duration_seconds":10,"prompt":"gentle memorial cinematic transition, soft light","negative_prompt":"extra animal, distorted pet"}'
 ```
@@ -131,7 +131,7 @@ mkdir -p data/input data/output
 2. CanvasJob 생성
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/jobs/canvas \
+curl -X POST http://localhost:18765/api/v1/jobs/canvas \
   -H "Content-Type: application/json" \
   -d '{"input_path":"data/input/pet1.jpg","output_path":"data/output/pet1_canvas.jpg","fast_mode":false,"animal_detection":true,"outpaint_prompt":"natural grassy field continuation, soft daylight, seamless background","outpaint_negative_prompt":"extra animal, duplicate pet, harsh border"}'
 ```
@@ -149,7 +149,7 @@ curl -X POST http://localhost:8000/api/v1/jobs/canvas \
 3. Job 조회
 
 ```bash
-curl http://localhost:8000/api/v1/jobs/<job_id>
+curl http://localhost:18765/api/v1/jobs/<job_id>
 ```
 
 `result_message`에서 아래 정보를 확인할 수 있습니다.
@@ -181,7 +181,7 @@ curl http://localhost:8000/api/v1/jobs/<job_id>
 ## 7. LastClipJob 실행
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/jobs/last-clip \
+curl -X POST http://localhost:18765/api/v1/jobs/last-clip \
   -H "Content-Type: application/json" \
   -d '{"image_path":"data/input/pet_last.jpg","output_path":"data/output/last_clip.mp4","duration_seconds":4,"motion_style":"zoom_in"}'
 ```
@@ -194,7 +194,7 @@ curl -X POST http://localhost:8000/api/v1/jobs/last-clip \
 ## 8. RenderJob 실행 (최종 병합)
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/jobs/render \
+curl -X POST http://localhost:18765/api/v1/jobs/render \
   -H "Content-Type: application/json" \
   -d '{"clip_paths":["data/output/transition_1.mp4","data/output/transition_2.mp4","data/output/last_clip.mp4"],"clip_orders":[2,1,3],"output_path":"data/output/final.mp4"}'
 ```
@@ -202,7 +202,7 @@ curl -X POST http://localhost:8000/api/v1/jobs/render \
 BGM 포함 예시:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/jobs/render \
+curl -X POST http://localhost:18765/api/v1/jobs/render \
   -H "Content-Type: application/json" \
   -d '{"clip_paths":["data/output/transition_1.mp4","data/output/transition_2.mp4","data/output/last_clip.mp4"],"output_path":"data/output/final.mp4","bgm_path":"data/input/bgm.mp3","bgm_volume":0.15}'
 ```
@@ -212,7 +212,7 @@ curl -X POST http://localhost:8000/api/v1/jobs/render \
 브라우저에서 아래 주소를 열면 동영상 파일 업로드 후 병합 요청을 보낼 수 있습니다.
 
 ```text
-http://127.0.0.1:8000/api/v1/jobs/render/upload-ui
+http://127.0.0.1:18765/api/v1/jobs/render/upload-ui
 ```
 
 화면에서:
@@ -233,16 +233,16 @@ http://127.0.0.1:8000/api/v1/jobs/render/upload-ui
 업로드 화면 모음:
 
 ```text
-http://127.0.0.1:8000/api/v1/jobs/upload-ui
+http://127.0.0.1:18765/api/v1/jobs/upload-ui
 ```
 
 개별 화면:
 
 ```text
-http://127.0.0.1:8000/api/v1/jobs/canvas/upload-ui
-http://127.0.0.1:8000/api/v1/jobs/transition/upload-ui
-http://127.0.0.1:8000/api/v1/jobs/last-clip/upload-ui
-http://127.0.0.1:8000/api/v1/jobs/pipeline/upload-ui
+http://127.0.0.1:18765/api/v1/jobs/canvas/upload-ui
+http://127.0.0.1:18765/api/v1/jobs/transition/upload-ui
+http://127.0.0.1:18765/api/v1/jobs/last-clip/upload-ui
+http://127.0.0.1:18765/api/v1/jobs/pipeline/upload-ui
 ```
 
 ## 9. PipelineJob 실행 (원클릭 전체 생성)
@@ -250,7 +250,7 @@ http://127.0.0.1:8000/api/v1/jobs/pipeline/upload-ui
 아래 요청 1회로 `Canvas -> Transition들 -> LastClip -> Render`를 순차 실행합니다.
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/jobs/pipeline \
+curl -X POST http://localhost:18765/api/v1/jobs/pipeline \
   -H "Content-Type: application/json" \
   -d '{
     "image_paths":["data/input/pet1.jpg","data/input/pet2.jpg","data/input/pet3.jpg"],
@@ -271,7 +271,7 @@ curl -X POST http://localhost:8000/api/v1/jobs/pipeline \
 1. 프로젝트 생성
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/projects \
+curl -X POST http://localhost:18765/api/v1/projects \
   -H "Content-Type: application/json" \
   -d '{
     "name":"memorial-project-001",
@@ -288,13 +288,13 @@ curl -X POST http://localhost:8000/api/v1/projects \
 2. 이미지 업로드(멀티파트)
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/projects/<project_id>/assets \
+curl -X POST http://localhost:18765/api/v1/projects/<project_id>/assets \
   -F "order_index=0" \
   -F "file=@data/input/pet1.jpg"
 ```
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/projects/<project_id>/assets \
+curl -X POST http://localhost:18765/api/v1/projects/<project_id>/assets \
   -F "order_index=1" \
   -F "file=@data/input/pet2.jpg"
 ```
@@ -302,7 +302,7 @@ curl -X POST http://localhost:8000/api/v1/projects/<project_id>/assets \
 3. 프로젝트 실행(원클릭)
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/projects/<project_id>/run \
+curl -X POST http://localhost:18765/api/v1/projects/<project_id>/run \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
@@ -310,7 +310,7 @@ curl -X POST http://localhost:8000/api/v1/projects/<project_id>/run \
 4. 프로젝트 실행 취소
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/projects/<project_id>/cancel
+curl -X POST http://localhost:18765/api/v1/projects/<project_id>/cancel
 ```
 
 ## 11. 주요 환경변수
@@ -366,7 +366,7 @@ curl -X POST http://localhost:8000/api/v1/projects/<project_id>/cancel
   "job_id": "xxxx",
   "status": "succeeded",
   "output_path": "/abs/path/data/output/final.mp4",
-  "download_uri": "http://127.0.0.1:8000/api/v1/jobs/render/output/final.mp4",
+  "download_uri": "http://127.0.0.1:18765/api/v1/jobs/render/output/final.mp4",
   "result_message": "final render done: ...",
   "timestamp_utc": "2026-02-19T02:10:00.000000+00:00"
 }

@@ -26,16 +26,6 @@ class OutpaintAdapter(Protocol):
         """
 
 
-def _merge_prompt(override: str | None, base: str) -> str:
-    base_clean = base.strip()
-    override_clean = (override or "").strip()
-    if not override_clean:
-        return base_clean
-    if not base_clean:
-        return override_clean
-    return f"{override_clean}, {base_clean}"
-
-
 class MirrorOutpaintAdapter:
     """Non-generative placeholder for early integration tests.
 
@@ -196,10 +186,11 @@ class DiffusersOutpaintAdapter:
         mask = Image.fromarray(padded_mask, mode="L")
 
         kwargs: dict[str, object] = {
-            "prompt": _merge_prompt(prompt, settings.outpaint_prompt),
-            "negative_prompt": _merge_prompt(
-                negative_prompt,
-                settings.outpaint_negative_prompt,
+            "prompt": prompt.strip() if prompt and prompt.strip() else settings.outpaint_prompt,
+            "negative_prompt": (
+                negative_prompt.strip()
+                if negative_prompt and negative_prompt.strip()
+                else settings.outpaint_negative_prompt
             ),
             "image": image,
             "mask_image": mask,
